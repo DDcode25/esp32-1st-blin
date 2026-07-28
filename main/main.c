@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "net_eth.h"
 #include "nvs_flash.h"
+#include "ota.h"
 #include "port.h"
 
 static const char *TAG = "main";
@@ -64,6 +65,10 @@ static void report_task(void *arg)
 {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(5000));
+
+        if (ota_in_progress()) {
+            continue;
+        }
 
         if (!eth_bridge_link_up()) {
             ESP_LOGI(TAG, "линка нет");
@@ -130,6 +135,8 @@ void app_main(void)
         ESP_LOGE(TAG, "не удалось создать порты, мост не работает");
         return;
     }
+
+    ota_start();
 
     xTaskCreate(status_task, "status", 2048, NULL, 3, NULL);
     xTaskCreate(report_task, "report", 4096, NULL, 3, NULL);

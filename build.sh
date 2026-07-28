@@ -53,24 +53,43 @@ for ENV_NAME in $ENVS; do
     fi
   done
 
-  # Смещения для ESP-IDF: загрузчик 0x1000, таблица разделов 0x8000,
-  # прошивка 0x10000. У ESP-IDF нет boot_app0 — он специфичен для Arduino.
+  # Адрес первого раздела приложения берётся из самой таблицы разделов,
+  # а не задаётся здесь константой. Жёстко прописанное 0x10000 (значение
+  # из таблицы Arduino) не совпадало с ota_0 по 0x20000: загрузчик не
+  # находил прошивку по нужному адресу, писал "invalid magic byte" и
+  # перебирал разделы наугад.
+  APP_OFFSET=$(awk -F, '/^ota_0/ {gsub(/ /,"",$4); print $4}' partitions.csv)
+  if [ -z "$APP_OFFSET" ]; then
+    echo "ОШИБКА: в partitions.csv не найден раздел ota_0"
+    exit 1
+  fi
+  echo "  раздел приложения: $APP_OFFSET"
+
+  # Загрузчик всегда по 0x1000, таблица разделов по 0x8000 — эти адреса
+  # зашиты в ПЗУ чипа и от таблицы не зависят. boot_app0 в ESP-IDF нет,
+  # он специфичен для Arduino.
   $PIO pkg exec -p tool-esptoolpy -- esptool.py --chip esp32 merge_bin \
     -o "$OUT" \
     --flash_mode dio --flash_freq 80m --flash_size 4MB \
-    0x1000  "$BUILD/bootloader.bin" \
-    0x8000  "$BUILD/partitions.bin" \
-    0x10000 "$BUILD/firmware.bin"
+    0x1000       "$BUILD/bootloader.bin" \
+    0x8000       "$BUILD/partitions.bin" \
+    "$APP_OFFSET" "$BUILD/firmware.bin"
 
-  # Проверяем, что образ собрался: по смещению 0x1000 должен стоять
-  # магический байт 0xE9 — признак корректного образа ESP32.
-  MAGIC=$(xxd -s 0x1000 -l 1 -p "$OUT" 2>/dev/null || echo "??")
-  if [ "$MAGIC" = "e9" ]; then
-    echo "  проверка: заголовок на месте (0xE9)"
-  else
-    echo "  ВНИМАНИЕ: неожиданный заголовок ($MAGIC), образ может быть битым"
+  # Проверяем и загрузчик, и прошивку: магический байт 0xE9 должен стоять
+  # в начале каждого образа ESP32. Раньше проверялся только загрузчик,
+  # и прошивка по неверному адресу проверку проходила.
+  BOOT_MAGIC=$(xxd -s 0x1000 -l 1 -p "$OUT" 2>/dev/null || echo "??")
+  APP_MAGIC=$(xxd -s $((APP_OFFSET)) -l 1 -p "$OUT" 2>/dev/null || echo "??")
+
+  if [ "$BOOT_MAGIC" != "e9" ]; then
+    echo "  ОШИБКА: загрузчик не на месте (0x1000 = $BOOT_MAGIC)"
     exit 1
   fi
+  if [ "$APP_MAGIC" != "e9" ]; then
+    echo "  ОШИБКА: прошивка не на месте ($APP_OFFSET = $APP_MAGIC)"
+    exit 1
+  fi
+  echo "  проверка: загрузчик и прошивка на своих адресах"
 done
 
 echo

@@ -1,6 +1,7 @@
 #include "web.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "config.h"
@@ -84,6 +85,36 @@ static const char INDEX_HTML[] =
 "<input id=p1pps type=number min=25 max=250></div>"
 "<table id=p1stats></table></div>"
 
+"<div class=card><h2>Терминал <button class=sec style='padding:4px 10px;"
+"font-size:12px;margin:0 0 0 8px' onclick=termToggle()>показать</button></h2>"
+"<div id=termbox style=display:none>"
+"<div class=row>"
+"<div><label>Порт</label><select id=termport>"
+"<option value=0>Порт 0 — CRSF</option>"
+"<option value=1>Порт 1 — MAVLink</option></select></div>"
+"<div><label>Куда отправлять</label><select id=termdst>"
+"<option value=net>партнёру через мост</option>"
+"<option value=uart>в UART этой платы</option>"
+"<option value=both>и туда, и туда</option>"
+"</select></div></div>"
+"<label>Вид</label><select id=termview>"
+"<option value=text>текст</option><option value=hex>hex</option></select>"
+"<pre id=termout style='background:#111;color:#0f0;padding:10px;"
+"border-radius:4px;height:180px;overflow:auto;font-size:12px;"
+"margin-top:12px;white-space:pre-wrap;word-break:break-all'></pre>"
+"<div class=row style=margin-top:8px>"
+"<div style=flex:4><input id=terminput placeholder='текст для отправки' "
+"onkeydown='if(event.key==\"Enter\")termSend()'></div>"
+"<div style=flex:1><button onclick=termSend() "
+"style=margin:0;width:100%>Отправить</button></div></div>"
+"<div class=warn>Принятое показывается с пометкой источника: "
+"<b>U</b> — пришло с UART, <b>N</b> — из сети от партнёра. "
+"Чтобы проверить мост целиком, замкни TX и RX на дальней плате: "
+"отправленное вернётся обратно.<br><br>"
+"Терминал — средство отладки, а не полноценный монитор: при плотном "
+"трафике часть байт не попадёт на экран. Счётчики выше считают всё.</div>"
+"</div></div>"
+
 "<div class=card><h2>Обновление прошивки</h2>"
 "<label>Файл firmware.bin</label>"
 "<input type=file id=fw accept=.bin>"
@@ -152,6 +183,32 @@ static const char INDEX_HTML[] =
 "async function reset(){if(!confirm('Сбросить все настройки к заводским?'))"
 "return;await fetch('/api/reset',{method:'POST'});"
 "alert('Сброшено. Нужна перезагрузка.')}"
+"let termOn=false,termPos={0:0,1:0},termTimer=null;"
+"function termToggle(){termOn=!termOn;"
+"g('termbox').style.display=termOn?'block':'none';"
+"event.target.textContent=termOn?'скрыть':'показать';"
+"if(termOn){termPoll();termTimer=setInterval(termPoll,300)}"
+"else{clearInterval(termTimer);termTimer=null}}"
+"function termPoll(){const p=g('termport').value;"
+"fetch('/api/term?p='+p+'&from='+termPos[p]).then(r=>r.json()).then(d=>{"
+"termPos[p]=d.pos;if(!d.data.length)return;"
+"const hex=g('termview').value=='hex';const out=g('termout');"
+"let t='';let lastSrc=null;"
+"for(const it of d.data){"
+"if(it.s!==lastSrc){t+=(t?'\n':'')+(it.s?'N< ':'U< ');lastSrc=it.s}"
+"if(hex){t+=it.b.toString(16).padStart(2,'0')+' '}"
+"else{t+=(it.b>=32&&it.b<127)?String.fromCharCode(it.b):"
+"(it.b==10?'\n'+(lastSrc?'N< ':'U< '):'.')}}"
+"out.textContent+=t;"
+"if(out.textContent.length>4000)"
+"out.textContent=out.textContent.slice(-4000);"
+"out.scrollTop=out.scrollHeight}).catch(()=>{})}"
+"function termSend(){const v=g('terminput').value;if(!v)return;"
+"fetch('/api/term?p='+g('termport').value+'&dst='+g('termdst').value,"
+"{method:'POST',body:v}).then(()=>{"
+"g('termout').textContent+='\n> '+v+'\n';"
+"g('terminput').value='';"
+"g('termout').scrollTop=g('termout').scrollHeight})}"
 "let busy=false;"
 "function upload(){const f=g('fw').files[0];"
 "if(!f){alert('Сначала выбери файл firmware.bin');return}"
@@ -488,6 +545,87 @@ static esp_err_t update_handler(httpd_req_t *req)
     return httpd_resp_send(req, "ok", 2);
 }
 
+// Отдаёт накопленное в буфере терминала начиная с позиции from.
+// Страница помнит свою позицию и запрашивает только новое.
+static esp_err_t term_get_handler(httpd_req_t *req)
+{
+    char query[64];
+    int port_idx = 0;
+    uint32_t from = 0;
+
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char val[24];
+        if (httpd_query_key_value(query, "p", val, sizeof(val)) == ESP_OK) {
+            port_idx = atoi(val);
+        }
+        if (httpd_query_key_value(query, "from", val, sizeof(val)) == ESP_OK) {
+            from = (uint32_t)strtoul(val, NULL, 10);
+        }
+    }
+
+    port_t *p = (port_idx == 1) ? s_port1 : s_port0;
+
+    // Порция ограничена: за 300 мс опроса на 400 кбод накопится больше,
+    // чем стоит гнать в браузер одним ответом.
+    uint8_t data[256];
+    term_src_t src[256];
+    const size_t n = port_terminal_read(p, &from, data, sizeof(data), src);
+
+    char *buf = malloc(4096);
+    if (!buf) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+        return ESP_FAIL;
+    }
+
+    size_t pos = snprintf(buf, 4096, "{\"pos\":%lu,\"data\":[",
+                          (unsigned long)from);
+    for (size_t i = 0; i < n; i++) {
+        pos += snprintf(buf + pos, 4096 - pos, "%s{\"b\":%u,\"s\":%d}",
+                        i ? "," : "", data[i], (int)src[i]);
+    }
+    pos += snprintf(buf + pos, 4096 - pos, "]}");
+
+    httpd_resp_set_type(req, "application/json");
+    const esp_err_t r = httpd_resp_send(req, buf, pos);
+    free(buf);
+    return r;
+}
+
+// Отправляет данные из терминала в UART, партнёру или туда и туда.
+static esp_err_t term_post_handler(httpd_req_t *req)
+{
+    char query[64];
+    int port_idx = 0;
+    bool to_uart = false;
+    bool to_net = true;
+
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char val[24];
+        if (httpd_query_key_value(query, "p", val, sizeof(val)) == ESP_OK) {
+            port_idx = atoi(val);
+        }
+        if (httpd_query_key_value(query, "dst", val, sizeof(val)) == ESP_OK) {
+            to_uart = (strcmp(val, "uart") == 0) || (strcmp(val, "both") == 0);
+            to_net = (strcmp(val, "net") == 0) || (strcmp(val, "both") == 0);
+        }
+    }
+
+    char body[256];
+    const int len = req->content_len < (int)sizeof(body) - 1
+                        ? req->content_len : (int)sizeof(body) - 1;
+    const int received = httpd_req_recv(req, body, len);
+    if (received <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty");
+        return ESP_FAIL;
+    }
+
+    port_t *p = (port_idx == 1) ? s_port1 : s_port0;
+    port_terminal_send(p, (const uint8_t *)body, received, to_uart, to_net);
+
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, "ok", 2);
+}
+
 static void reboot_task(void *arg)
 {
     // Даём ответу дойти до браузера: перезагрузка посреди отправки оставила
@@ -553,6 +691,8 @@ void web_start(port_t *port0, port_t *port1, settings_t *settings)
         {"/api/reboot",  HTTP_POST, reboot_handler,      NULL},
         {"/api/reset",   HTTP_POST, reset_handler,       NULL},
         {"/api/update",  HTTP_POST, update_handler,      NULL},
+        {"/api/term",    HTTP_GET,  term_get_handler,    NULL},
+        {"/api/term",    HTTP_POST, term_post_handler,   NULL},
     };
 
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

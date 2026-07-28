@@ -39,7 +39,37 @@ struct port_s {
     // до 143 или 166 Гц, что для CRSF неприемлемо.
     esp_timer_handle_t pace_timer;
     TaskHandle_t pace_task;
+
+    // Кольцевой буфер для терминала на веб-странице. Позиция монотонно
+    // растёт, страница помнит свою и запрашивает только новое.
+    uint8_t term_buf[TERM_BUFFER_SIZE];
+    uint8_t term_src[TERM_BUFFER_SIZE];
+    uint32_t term_pos;
+    SemaphoreHandle_t term_lock;
 };
+
+// Кладёт принятые байты в буфер терминала. Вызывается из обеих задач порта,
+// поэтому под мьютексом.
+static void term_push(port_t *p, const uint8_t *data, size_t len,
+                      term_src_t src)
+{
+    if (!p->term_lock) {
+        return;
+    }
+    if (xSemaphoreTake(p->term_lock, 0) != pdTRUE) {
+        // Не ждём: диагностика не должна задерживать передачу данных.
+        return;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        const size_t idx = p->term_pos % TERM_BUFFER_SIZE;
+        p->term_buf[idx] = data[i];
+        p->term_src[idx] = (uint8_t)src;
+        p->term_pos++;
+    }
+
+    xSemaphoreGive(p->term_lock);
+}
 
 static const char *TAG = "port";
 
@@ -86,6 +116,7 @@ static void uart_to_net_task(void *arg)
 
         p->stats.uart_rx_bytes += n;
         debug_hex(p->name, "UART->сеть", buf, n);
+        term_push(p, buf, n, TERM_SRC_UART);
 
         if (!eth_bridge_link_up()) {
             p->stats.udp_tx_dropped++;
@@ -132,6 +163,7 @@ static void net_to_uart_task(void *arg)
         p->stats.udp_rx_packets++;
         p->stats.last_rx_ms = now_ms();
         debug_hex(p->name, "сеть->UART", buf, n);
+        term_push(p, buf, n, TERM_SRC_NET);
 
         if (port_mode(p) == PORT_MODE_CRSF) {
             // Разбираем на фреймы и кладём в очередь. В UART здесь ничего
@@ -294,6 +326,12 @@ port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
         return NULL;
     }
 
+    p->term_lock = xSemaphoreCreateMutex();
+    if (!p->term_lock) {
+        free(p);
+        return NULL;
+    }
+
     crsf_parser_init(&p->net_parser, on_crsf_frame, p);
     if (!crsf_pacer_init(&p->pacer, cfg->pps)) {
         ESP_LOGE(TAG, "[%s] не удалось создать выравниватель темпа", name);
@@ -387,6 +425,61 @@ void port_get_config(port_t *p, port_config_t *out)
 const char *port_name(port_t *p)
 {
     return p->name;
+}
+
+void port_terminal_send(port_t *p, const uint8_t *data, size_t len,
+                        bool to_uart, bool to_net)
+{
+    if (to_uart) {
+        const int written = uart_write_bytes(p->uart_num, data, len);
+        if (written > 0) {
+            p->stats.uart_tx_bytes += written;
+        }
+    }
+
+    if (to_net && eth_bridge_link_up()) {
+        const int sent = sendto(p->sock, data, len, 0,
+                                (struct sockaddr *)&p->peer_addr,
+                                sizeof(p->peer_addr));
+        if (sent == (int)len) {
+            p->stats.udp_tx_packets++;
+        } else {
+            p->stats.udp_tx_dropped++;
+        }
+    }
+}
+
+size_t port_terminal_read(port_t *p, uint32_t *from, uint8_t *out,
+                          size_t out_cap, term_src_t *src_out)
+{
+    if (!p->term_lock) {
+        return 0;
+    }
+    xSemaphoreTake(p->term_lock, portMAX_DELAY);
+
+    const uint32_t now = p->term_pos;
+
+    // Если читатель отстал больше, чем вмещает буфер, старое уже затёрто —
+    // отдаём то, что есть, начиная с самого раннего сохранившегося байта.
+    uint32_t start = *from;
+    if (now - start > TERM_BUFFER_SIZE) {
+        start = now - TERM_BUFFER_SIZE;
+    }
+
+    size_t count = 0;
+    while (start < now && count < out_cap) {
+        const size_t idx = start % TERM_BUFFER_SIZE;
+        out[count] = p->term_buf[idx];
+        if (src_out) {
+            src_out[count] = (term_src_t)p->term_src[idx];
+        }
+        count++;
+        start++;
+    }
+
+    *from = start;
+    xSemaphoreGive(p->term_lock);
+    return count;
 }
 
 bool port_peer_alive(port_t *p)

@@ -49,31 +49,32 @@
 
 // --- Сеть -------------------------------------------------------------------
 // Прямое соединение двух модулей кабелем: DHCP-сервера в такой топологии нет,
-// адреса статические. Роль задаётся флагом сборки в platformio.ini.
+// адреса статические.
+//
+// Прошивка ОДНА для обеих плат. Роль и адреса задаются через веб-интерфейс
+// и хранятся в NVS — так нельзя перепутать образы при заливке.
+//
+// Значения ниже — только начальные, для платы, которую ещё не настраивали.
 
-#if defined(BRIDGE_ROLE_GROUND)
-  #define BRIDGE_ROLE_NAME      "GROUND"
-  #define BRIDGE_LOCAL_IP       "192.168.4.1"
-  #define BRIDGE_PEER_IP        "192.168.4.2"
-#elif defined(BRIDGE_ROLE_AIR)
-  #define BRIDGE_ROLE_NAME      "AIR"
-  #define BRIDGE_LOCAL_IP       "192.168.4.2"
-  #define BRIDGE_PEER_IP        "192.168.4.1"
-#else
-  #error "Не задана роль модуля. Собирайте окружение 'ground' или 'air'."
-#endif
-
+#define BRIDGE_DEFAULT_ROLE     ROLE_GROUND
+#define BRIDGE_DEFAULT_IP       "192.168.4.1"
+#define BRIDGE_DEFAULT_PEER     "192.168.4.2"
 #define BRIDGE_NETMASK          "255.255.255.0"
+
 // Шлюза в прямом соединении нет. Указываем собственный адрес, чтобы стек
 // не пытался маршрутизировать наружу.
-#define BRIDGE_GATEWAY          BRIDGE_LOCAL_IP
+#define BRIDGE_DEFAULT_GATEWAY  BRIDGE_DEFAULT_IP
+
+// Адреса для роли AIR — подставляются при переключении роли в интерфейсе.
+#define BRIDGE_AIR_IP           "192.168.4.2"
+#define BRIDGE_AIR_PEER         "192.168.4.1"
 
 // UDP-порты: каждый порт данных получает свой, чтобы потоки CRSF и MAVLink
 // не смешивались и могли иметь разную политику доставки.
 #define PORT0_UDP_PORT          14551
 #define PORT1_UDP_PORT          14552
 
-#define BRIDGE_HOSTNAME         "espbridge-" BRIDGE_ROLE_NAME
+#define BRIDGE_HOSTNAME         "espbridge"
 
 // Пароль прошивки по сети. Должен совпадать с --auth в platformio.ini.
 // Без него любой в сети может залить в модуль свою прошивку.

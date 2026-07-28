@@ -104,8 +104,7 @@ static void report_task(void *arg)
 void app_main(void)
 {
     ESP_LOGI(TAG, "=== ESPBridge ===");
-    ESP_LOGI(TAG, "роль %s, сборка %s %s", BRIDGE_ROLE_NAME, __DATE__,
-             __TIME__);
+    ESP_LOGI(TAG, "сборка %s %s", __DATE__, __TIME__);
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES ||

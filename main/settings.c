@@ -11,6 +11,11 @@
 static const char *TAG = "cfg";
 static const char *NS = "espbridge";
 
+const char *settings_role_name(bridge_role_t role)
+{
+    return role == ROLE_AIR ? "AIR" : "GROUND";
+}
+
 bool settings_valid_ip(const char *s)
 {
     if (!s || !*s) {
@@ -39,12 +44,12 @@ void settings_load(settings_t *out)
 {
     memset(out, 0, sizeof(*out));
 
-    // Значения по умолчанию — из config.h, то есть зависят от роли,
-    // заданной флагом сборки.
-    strlcpy(out->local_ip, BRIDGE_LOCAL_IP, IP_STR_LEN);
+    // Значения по умолчанию для платы, которую ещё не настраивали.
+    out->role = BRIDGE_DEFAULT_ROLE;
+    strlcpy(out->local_ip, BRIDGE_DEFAULT_IP, IP_STR_LEN);
     strlcpy(out->netmask, BRIDGE_NETMASK, IP_STR_LEN);
-    strlcpy(out->gateway, BRIDGE_GATEWAY, IP_STR_LEN);
-    strlcpy(out->peer_ip, BRIDGE_PEER_IP, IP_STR_LEN);
+    strlcpy(out->gateway, BRIDGE_DEFAULT_GATEWAY, IP_STR_LEN);
+    strlcpy(out->peer_ip, BRIDGE_DEFAULT_PEER, IP_STR_LEN);
 
     out->port0.baud = 400000;
     out->port0.mode = PORT_MODE_TRANSPARENT;
@@ -60,6 +65,11 @@ void settings_load(settings_t *out)
         return;
     }
 
+    uint8_t role;
+    if (nvs_get_u8(nvs, "role", &role) == ESP_OK) {
+        out->role = (role == ROLE_AIR) ? ROLE_AIR : ROLE_GROUND;
+    }
+
     load_str(nvs, "ip", out->local_ip, IP_STR_LEN, out->local_ip);
     load_str(nvs, "mask", out->netmask, IP_STR_LEN, out->netmask);
     load_str(nvs, "gw", out->gateway, IP_STR_LEN, out->gateway);
@@ -68,6 +78,7 @@ void settings_load(settings_t *out)
     uint32_t u32;
     uint8_t u8;
     uint16_t u16;
+
 
     if (nvs_get_u32(nvs, "p0baud", &u32) == ESP_OK) out->port0.baud = u32;
     if (nvs_get_u8(nvs, "p0mode", &u8) == ESP_OK) out->port0.mode = u8;
@@ -79,7 +90,8 @@ void settings_load(settings_t *out)
 
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "настройки: %s -> %s", out->local_ip, out->peer_ip);
+    ESP_LOGI(TAG, "роль %s, %s -> %s", settings_role_name(out->role),
+             out->local_ip, out->peer_ip);
 }
 
 bool settings_save(const settings_t *s)
@@ -97,6 +109,7 @@ bool settings_save(const settings_t *s)
         return false;
     }
 
+    nvs_set_u8(nvs, "role", (uint8_t)s->role);
     nvs_set_str(nvs, "ip", s->local_ip);
     nvs_set_str(nvs, "mask", s->netmask);
     nvs_set_str(nvs, "gw", s->gateway);
@@ -129,7 +142,7 @@ bool settings_reset(void)
 
     // Стираем только свои ключи: флаги отладки лежат в том же пространстве
     // имён и к сетевым настройкам отношения не имеют.
-    const char *keys[] = {"ip", "mask", "gw", "peer",
+    const char *keys[] = {"role", "ip", "mask", "gw", "peer",
                           "p0baud", "p0mode", "p0pps",
                           "p1baud", "p1mode", "p1pps"};
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {

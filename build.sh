@@ -2,11 +2,12 @@
 # ============================================================================
 # ESPBridge — сборка образа, готового к заливке
 #
-#   ./build.sh ground     наземный модуль, 192.168.4.1
-#   ./build.sh air        бортовой модуль, 192.168.4.2
-#   ./build.sh all        оба (по умолчанию)
+#   ./build.sh
 #
-# Результат — out/*_MERGED.bin. Заливать по адресу 0x0.
+# Результат — out/espbridge_MERGED.bin. Заливать по адресу 0x0.
+#
+# Прошивка ОДНА для обеих плат: роль и адреса задаются через веб-интерфейс
+# и хранятся в NVS. Перепутать образы при заливке невозможно.
 #
 # --------------------------------------------------------------------------
 # ВАЖНО: заливать нужно именно *_MERGED.bin, а НЕ firmware.bin.
@@ -24,21 +25,7 @@
 
 set -e
 
-ROLE="${1:-all}"
-
-case "$ROLE" in
-  ground) ENVS="ground" ;;
-  air)    ENVS="air" ;;
-  all)    ENVS="ground air" ;;
-  *)
-    echo "Использование: $0 {ground|air|all}"
-    echo
-    echo "  ground   наземный модуль, IP 192.168.4.1"
-    echo "  air      бортовой модуль, IP 192.168.4.2"
-    echo "  all      оба (по умолчанию)"
-    exit 1
-    ;;
-esac
+ENVS="espbridge"
 
 if command -v pio >/dev/null 2>&1; then
   PIO="pio"
@@ -90,9 +77,14 @@ echo
 echo "=== Готово ==="
 ls -la out/
 echo
-echo "Заливать так (порт подставить свой):"
+echo "Заливать на ОБЕ платы одинаково (порт подставить свой):"
 echo
 echo "  esptool --chip esp32 --port COM15 --baud 921600 write-flash -z \\"
 echo "    --flash-mode dio --flash-freq 80m --flash-size 4MB \\"
-echo "    0x0 out/ground_MERGED.bin"
+echo "    0x0 out/espbridge_MERGED.bin"
+echo
+echo "После заливки первая плата поднимется на 192.168.4.1 как GROUND."
+echo "Вторую настроить через веб-интерфейс: роль AIR, адрес 192.168.4.2."
+echo "Две ненастроенные платы в одной сети одновременно включать нельзя —"
+echo "у них будет одинаковый адрес."
 echo

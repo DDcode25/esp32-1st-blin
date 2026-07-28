@@ -44,17 +44,23 @@ static const char INDEX_HTML[] =
 "border-radius:4px;font-size:13px;margin-top:8px}"
 ".row{display:flex;gap:12px}.row>div{flex:1}"
 "</style></head><body>"
-"<header><b>ESPBridge</b><span id=role></span><span id=link>—</span></header>"
+"<header><b>ESPBridge</b><span id=rolebadge></span>"
+"<span id=link>—</span></header>"
 "<main>"
 
 "<div class=card><h2>Сеть</h2>"
+"<label>Роль модуля</label><select id=role onchange=roleChanged()>"
+"<option value=0>GROUND — наземный, у пульта</option>"
+"<option value=1>AIR — бортовой, у полётного контроллера</option>"
+"</select>"
 "<div class=row>"
 "<div><label>IP этого модуля</label><input id=ip></div>"
 "<div><label>Маска</label><input id=mask></div></div>"
 "<div class=row>"
 "<div><label>Шлюз</label><input id=gw></div>"
 "<div><label>IP партнёра</label><input id=peer></div></div>"
-"<div class=warn>Сетевые настройки применяются после перезагрузки.</div>"
+"<div class=warn>Сетевые настройки применяются после перезагрузки. "
+"Смена роли подставляет типовые адреса — их можно изменить вручную.</div>"
 "</div>"
 
 "<div class=card><h2>Порт 0 — UART1 (GPIO32/33), CRSF</h2>"
@@ -84,6 +90,10 @@ static const char INDEX_HTML[] =
 
 "<script>"
 "function g(i){return document.getElementById(i)}"
+"function roleChanged(){const a=g('role').value=='1';"
+"g('ip').value=a?'192.168.4.2':'192.168.4.1';"
+"g('peer').value=a?'192.168.4.1':'192.168.4.2';"
+"g('gw').value=g('ip').value}"
 "function sync(p){g(p+'ppsbox').style.display=g(p+'mode').value=='1'"
 "?'block':'none'}"
 "function row(k,v,c){return `<tr><td>${k}</td><td class=\"${c||''}\">${v}"
@@ -102,18 +112,19 @@ static const char INDEX_HTML[] =
 "g(el).innerHTML=h}"
 "async function refresh(){try{"
 "const d=await(await fetch('/api/status')).json();"
-"g('role').textContent=d.role;const l=g('link');"
+"g('rolebadge').textContent=d.role;const l=g('link');"
 "l.textContent=d.link?'линк '+d.speed+' Мбит/с':'нет линка';"
 "l.className=d.link?'ok':'bad';"
 "stats('p0stats',d.p0);stats('p1stats',d.p1);"
 "}catch(e){g('link').textContent='нет связи с модулем';g('link').className='bad'}}"
 "async function load(){const d=await(await fetch('/api/config')).json();"
-"g('ip').value=d.ip;g('mask').value=d.mask;g('gw').value=d.gw;"
-"g('peer').value=d.peer;"
+"g('role').value=d.role;g('ip').value=d.ip;g('mask').value=d.mask;"
+"g('gw').value=d.gw;g('peer').value=d.peer;"
 "for(const p of ['p0','p1']){g(p+'baud').value=d[p].baud;"
 "g(p+'mode').value=d[p].mode;g(p+'pps').value=d[p].pps;"
 "g(p+'mode').onchange=()=>sync(p);sync(p)}}"
-"async function save(){const b={ip:g('ip').value,mask:g('mask').value,"
+"async function save(){const b={role:+g('role').value,ip:g('ip').value,"
+"mask:g('mask').value,"
 "gw:g('gw').value,peer:g('peer').value,"
 "p0:{baud:+g('p0baud').value,mode:+g('p0mode').value,pps:+g('p0pps').value},"
 "p1:{baud:+g('p1baud').value,mode:+g('p1mode').value,pps:+g('p1pps').value}};"
@@ -243,7 +254,7 @@ static esp_err_t status_handler(httpd_req_t *req)
 
     pos += snprintf(buf, sizeof(buf),
                     "{\"role\":\"%s\",\"link\":%s,\"speed\":%d,",
-                    BRIDGE_ROLE_NAME,
+                    settings_role_name(s_settings->role),
                     eth_bridge_link_up() ? "true" : "false",
                     eth_bridge_link_speed());
 
@@ -260,11 +271,12 @@ static esp_err_t config_get_handler(httpd_req_t *req)
 {
     char buf[512];
     const int n = snprintf(buf, sizeof(buf),
-        "{\"ip\":\"%s\",\"mask\":\"%s\",\"gw\":\"%s\",\"peer\":\"%s\","
+        "{\"role\":%d,\"ip\":\"%s\",\"mask\":\"%s\",\"gw\":\"%s\","
+        "\"peer\":\"%s\","
         "\"p0\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u},"
         "\"p1\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u}}",
-        s_settings->local_ip, s_settings->netmask, s_settings->gateway,
-        s_settings->peer_ip,
+        (int)s_settings->role, s_settings->local_ip, s_settings->netmask,
+        s_settings->gateway, s_settings->peer_ip,
         (unsigned long)s_settings->port0.baud, (int)s_settings->port0.mode,
         s_settings->port0.pps,
         (unsigned long)s_settings->port1.baud, (int)s_settings->port1.mode,
@@ -309,6 +321,11 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     body[received] = '\0';
 
     settings_t next = *s_settings;
+
+    long role;
+    if (json_num(body, NULL, "role", &role)) {
+        next.role = (role == 1) ? ROLE_AIR : ROLE_GROUND;
+    }
 
     char tmp[IP_STR_LEN];
     if (json_str(body, "ip", tmp, sizeof(tmp)))   strlcpy(next.local_ip, tmp, IP_STR_LEN);

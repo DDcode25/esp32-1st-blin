@@ -215,8 +215,7 @@ static void ota_task(void *arg)
     }
 
     const esp_app_desc_t *app = esp_app_get_description();
-    ESP_LOGI(TAG, "готов на %s:%d, версия %s", BRIDGE_LOCAL_IP, OTA_UDP_PORT,
-             app->version);
+    ESP_LOGI(TAG, "готов на порту %d, версия %s", OTA_UDP_PORT, app->version);
 
     char msg[256];
     char nonce[33];

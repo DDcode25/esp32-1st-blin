@@ -14,7 +14,15 @@
 
 #define IP_STR_LEN 16
 
+// Роль влияет только на подпись в логе и интерфейсе. Поведение моста
+// определяется адресами: кто на каком адресе и куда шлёт.
+typedef enum {
+    ROLE_GROUND = 0,
+    ROLE_AIR = 1,
+} bridge_role_t;
+
 typedef struct {
+    bridge_role_t role;
     char local_ip[IP_STR_LEN];
     char netmask[IP_STR_LEN];
     char gateway[IP_STR_LEN];
@@ -38,3 +46,5 @@ bool settings_reset(void);
 
 // Проверяет, что строка — корректный адрес IPv4.
 bool settings_valid_ip(const char *s);
+
+const char *settings_role_name(bridge_role_t role);

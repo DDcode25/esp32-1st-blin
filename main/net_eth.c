@@ -83,7 +83,7 @@ void eth_bridge_start(const char *local_ip, const char *netmask,
 {
     strlcpy(s_peer_ip, peer_ip, sizeof(s_peer_ip));
 
-    ESP_LOGI(TAG, "роль %s, адрес %s", BRIDGE_ROLE_NAME, local_ip);
+    ESP_LOGI(TAG, "адрес %s, маска %s", local_ip, netmask);
 
     phy_power_on();
 

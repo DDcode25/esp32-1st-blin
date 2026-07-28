@@ -155,6 +155,9 @@ static const char INDEX_HTML[] =
 "let busy=false;"
 "function upload(){const f=g('fw').files[0];"
 "if(!f){alert('Сначала выбери файл firmware.bin');return}"
+"if(f.size>2000000){alert('Файл '+Math.round(f.size/1024)+' КБ — это "
+"слишком много. Похоже, выбран дамп флеша или склеенный образ.\n\n"
+"Нужен firmware.bin из .pio/build/espbridge/ (около 460 КБ).');return}"
 "if(f.name.includes('MERGED')){"
 "if(!confirm('Похоже, это склеенный образ, а не firmware.bin. "
 "Он не подойдёт для обновления по сети. Всё равно продолжить?'))return}"
@@ -395,9 +398,25 @@ static esp_err_t update_handler(httpd_req_t *req)
 
     ESP_LOGI(TAG, "приём прошивки: %u байт", (unsigned)total);
 
+    // Размер проверяем до начала записи и отвечаем внятно: чаще всего сюда
+    // приходит дамп флеша на 4 МБ или склеенный образ вместо firmware.bin,
+    // и пользователю нужно понять, какой файл брать.
+    const size_t limit = ota_upload_max_size();
+    if (total > limit) {
+        // Русский текст в UTF-8 занимает по два байта на букву, отсюда
+        // размер буфера с запасом.
+        char msg[256];
+        snprintf(msg, sizeof(msg),
+                 "Файл %u КБ не помещается в раздел %u КБ. "
+                 "Нужен firmware.bin, а не дамп флеша и не *_MERGED.bin.",
+                 (unsigned)(total / 1024), (unsigned)(limit / 1024));
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, msg);
+        return ESP_FAIL;
+    }
+
     if (!ota_upload_begin(total)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                            "cannot start");
+                            "не удалось начать запись, см. лог");
         return ESP_FAIL;
     }
 

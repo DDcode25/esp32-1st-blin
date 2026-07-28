@@ -343,6 +343,12 @@ static size_t s_upload_total = 0;
 static size_t s_upload_written = 0;
 static int s_upload_last_percent = -1;
 
+size_t ota_upload_max_size(void)
+{
+    const esp_partition_t *target = esp_ota_get_next_update_partition(NULL);
+    return target ? target->size : 0;
+}
+
 bool ota_upload_begin(size_t total_size)
 {
     if (s_in_progress) {

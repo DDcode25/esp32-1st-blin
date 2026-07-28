@@ -6,6 +6,7 @@
 #include "config.h"
 #include "crsf.h"
 #include "crsf_pacer.h"
+#include "debug.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -75,6 +76,7 @@ static void uart_to_net_task(void *arg)
         }
 
         p->stats.uart_rx_bytes += n;
+        debug_hex(p->name, "UART->сеть", buf, n);
 
         if (!eth_bridge_link_up()) {
             p->stats.udp_tx_dropped++;
@@ -115,6 +117,7 @@ static void net_to_uart_task(void *arg)
 
         p->stats.udp_rx_packets++;
         p->stats.last_rx_ms = now_ms();
+        debug_hex(p->name, "сеть->UART", buf, n);
 
         if (port_mode(p) == PORT_MODE_CRSF) {
             // Разбираем на фреймы и кладём в очередь. В UART здесь ничего
@@ -153,8 +156,15 @@ static void pace_task_fn(void *arg)
     port_t *p = (port_t *)arg;
     uint8_t frame[CRSF_FRAME_MAX];
 
+    // Измеряет реальные интервалы выдачи. Разброс между минимумом и
+    // максимумом — это джиттер, ради устранения которого делался
+    // выравниватель темпа. Включается командой "dbg timing".
+    debug_timing_t timing;
+    debug_timing_init(&timing, "выдача CRSF");
+
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        debug_timing_tick(&timing);
 
         if (port_mode(p) != PORT_MODE_CRSF) {
             continue;

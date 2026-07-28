@@ -9,6 +9,8 @@
 // ============================================================================
 
 #include "config.h"
+#include "console.h"
+#include "debug.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -110,6 +112,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
+    debug_init();
     led_init();
     eth_bridge_start();
 
@@ -137,6 +140,7 @@ void app_main(void)
     }
 
     ota_start();
+    console_start(s_port0, s_port1);
 
     xTaskCreate(status_task, "status", 2048, NULL, 3, NULL);
     xTaskCreate(report_task, "report", 4096, NULL, 3, NULL);

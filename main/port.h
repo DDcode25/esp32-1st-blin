@@ -52,6 +52,9 @@ typedef struct {
 // режиме CRSF критичнее по времени, чем приём из сети.
 typedef struct port_s port_t;
 
+// Глубина очереди выдачи — для вывода в консоли.
+#define PACER_QUEUE_DEPTH_PUBLIC 8
+
 // Создаёт и запускает порт. Вызывать после подъёма Ethernet.
 port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
                     uint16_t udp_port, const char *peer_ip, const char *name,

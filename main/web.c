@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "net_eth.h"
+#include "ota.h"
 
 static const char *TAG = "web";
 
@@ -83,6 +84,19 @@ static const char INDEX_HTML[] =
 "<input id=p1pps type=number min=25 max=250></div>"
 "<table id=p1stats></table></div>"
 
+"<div class=card><h2>Обновление прошивки</h2>"
+"<label>Файл firmware.bin</label>"
+"<input type=file id=fw accept=.bin>"
+"<div class=warn>Нужен <b>firmware.bin</b> из .pio/build/espbridge/, "
+"а не espbridge_MERGED.bin. Через сеть обновляется только приложение; "
+"загрузчик и таблица разделов остаются на месте.</div>"
+"<div id=fwprog style=display:none>"
+"<div style='background:#eee;border-radius:4px;height:8px;margin-top:12px'>"
+"<div id=fwbar style='background:#111;height:8px;border-radius:4px;width:0%'>"
+"</div></div><div id=fwtext style='font-size:13px;margin-top:6px'></div>"
+"</div>"
+"<button onclick=upload()>Прошить</button></div>"
+
 "<button onclick=save()>Сохранить</button>"
 "<button class=sec onclick=reboot()>Перезагрузить</button>"
 "<button class=sec onclick=reset()>Сбросить настройки</button>"
@@ -138,7 +152,28 @@ static const char INDEX_HTML[] =
 "async function reset(){if(!confirm('Сбросить все настройки к заводским?'))"
 "return;await fetch('/api/reset',{method:'POST'});"
 "alert('Сброшено. Нужна перезагрузка.')}"
-"load();refresh();setInterval(refresh,1000);"
+"let busy=false;"
+"function upload(){const f=g('fw').files[0];"
+"if(!f){alert('Сначала выбери файл firmware.bin');return}"
+"if(f.name.includes('MERGED')){"
+"if(!confirm('Похоже, это склеенный образ, а не firmware.bin. "
+"Он не подойдёт для обновления по сети. Всё равно продолжить?'))return}"
+"if(!confirm('Прошить '+f.name+' ('+Math.round(f.size/1024)+' КБ)? "
+"Мост остановится на время записи.'))return;"
+"busy=true;g('fwprog').style.display='block';"
+"const x=new XMLHttpRequest();x.open('POST','/api/update');"
+"x.upload.onprogress=e=>{if(e.lengthComputable){"
+"const p=Math.round(e.loaded*100/e.total);"
+"g('fwbar').style.width=p+'%';g('fwtext').textContent=p+'%'}};"
+"x.onload=()=>{busy=false;"
+"if(x.status==200){g('fwtext').textContent='Готово';"
+"if(confirm('Прошивка записана. Перезагрузить сейчас?'))reboot()}"
+"else{g('fwtext').textContent='Ошибка: '+x.responseText;"
+"alert('Не удалось прошить: '+x.responseText)}};"
+"x.onerror=()=>{busy=false;g('fwtext').textContent='Обрыв связи';"
+"alert('Обрыв связи. Плата работает на старой прошивке.')};"
+"x.send(f)}"
+"load();refresh();setInterval(()=>{if(!busy)refresh()},1000);"
 "</script></body></html>";
 
 // --- вспомогательное для JSON ------------------------------------------------
@@ -347,6 +382,67 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     return httpd_resp_send(req, "ok", 2);
 }
 
+// Приём файла прошивки. Тело читается порциями: образ около 500 КБ,
+// а свободной кучи меньше — целиком в память он не поместится.
+static esp_err_t update_handler(httpd_req_t *req)
+{
+    const size_t total = req->content_len;
+
+    if (total == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty");
+        return ESP_FAIL;
+    }
+
+    if (!ota_upload_begin(total)) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                            "cannot start");
+        return ESP_FAIL;
+    }
+
+    uint8_t *buf = malloc(4096);
+    if (!buf) {
+        ota_upload_abort();
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
+        return ESP_FAIL;
+    }
+
+    size_t received = 0;
+    while (received < total) {
+        const size_t want = (total - received) < 4096 ? (total - received) : 4096;
+        const int n = httpd_req_recv(req, (char *)buf, want);
+
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (n <= 0) {
+            free(buf);
+            ota_upload_abort();
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "connection lost");
+            return ESP_FAIL;
+        }
+
+        if (!ota_upload_write(buf, n)) {
+            free(buf);
+            httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                "write failed");
+            return ESP_FAIL;
+        }
+        received += n;
+    }
+
+    free(buf);
+
+    if (!ota_upload_end()) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "image rejected: wrong file?");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_send(req, "ok", 2);
+}
+
 static void reboot_task(void *arg)
 {
     // Даём ответу дойти до браузера: перезагрузка посреди отправки оставила
@@ -380,6 +476,12 @@ void web_start(port_t *port0, port_t *port1, settings_t *settings)
     // Приоритет ниже, чем у задач моста: веб-интерфейс не должен отнимать
     // время у передачи данных.
     cfg.task_priority = 4;
+    // Загрузка прошивки занимает десятки секунд — стандартных 5 с мало.
+    cfg.recv_wait_timeout = 30;
+    cfg.send_wait_timeout = 30;
+    // Обработчик update_handler держит соединение долго; стек по умолчанию
+    // мал для работы с буфером в 4 КБ и вызовами esp_ota_write.
+    cfg.stack_size = 8192;
 
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &cfg) != ESP_OK) {
@@ -394,6 +496,7 @@ void web_start(port_t *port0, port_t *port1, settings_t *settings)
         {"/api/config",  HTTP_POST, config_post_handler, NULL},
         {"/api/reboot",  HTTP_POST, reboot_handler,      NULL},
         {"/api/reset",   HTTP_POST, reset_handler,       NULL},
+        {"/api/update",  HTTP_POST, update_handler,      NULL},
     };
 
     for (size_t i = 0; i < sizeof(routes) / sizeof(routes[0]); i++) {

@@ -1,11 +1,13 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Запускает приём прошивки по сети. Вызывать после подъёма Ethernet.
 //
 // Совместимо с espota.py, который использует PlatformIO:
-//   pio run -e ground-ota -t upload
+//   pio run -e ota -t upload
 //
 // Пароль задаётся в config.h (OTA_PASSWORD) и должен совпадать с --auth
 // в platformio.ini.
@@ -15,3 +17,21 @@ void ota_start(void);
 // обслуживание портов отнимает время у записи во flash, а прерванная
 // прошивка означает откат на старый раздел и потерю времени.
 bool ota_in_progress(void);
+
+// --- Загрузка файла через веб-интерфейс --------------------------------------
+//
+// Приём идёт порциями по мере поступления тела HTTP-запроса, а не целиком
+// в память: образ около 500 КБ, а свободной кучи меньше.
+
+// Начинает приём. total_size — размер образа из заголовка Content-Length.
+bool ota_upload_begin(size_t total_size);
+
+// Записывает очередную порцию. Возвращает false при ошибке записи.
+bool ota_upload_write(const uint8_t *data, size_t len);
+
+// Завершает приём: проверяет образ и переключает загрузочный раздел.
+// После успеха плату нужно перезагрузить.
+bool ota_upload_end(void);
+
+// Прерывает приём и освобождает ресурсы.
+void ota_upload_abort(void);

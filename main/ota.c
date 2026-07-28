@@ -330,3 +330,122 @@ void ota_start(void)
 {
     xTaskCreate(ota_task, "ota", 8192, NULL, 5, NULL);
 }
+
+// --- Загрузка через веб-интерфейс --------------------------------------------
+//
+// Отдельный набор функций, а не переиспользование receive_firmware():
+// там данные забираются из сокета самой платой, здесь — приходят порциями
+// из обработчика HTTP-запроса, и владелец потока другой.
+
+static esp_ota_handle_t s_upload_handle = 0;
+static const esp_partition_t *s_upload_target = NULL;
+static size_t s_upload_total = 0;
+static size_t s_upload_written = 0;
+static int s_upload_last_percent = -1;
+
+bool ota_upload_begin(size_t total_size)
+{
+    if (s_in_progress) {
+        ESP_LOGW(TAG, "прошивка уже идёт");
+        return false;
+    }
+
+    s_upload_target = esp_ota_get_next_update_partition(NULL);
+    if (!s_upload_target) {
+        ESP_LOGE(TAG, "нет свободного раздела для прошивки");
+        return false;
+    }
+
+    if (total_size > s_upload_target->size) {
+        ESP_LOGE(TAG, "образ %u КБ не помещается в раздел %u КБ",
+                 (unsigned)(total_size / 1024),
+                 (unsigned)(s_upload_target->size / 1024));
+        return false;
+    }
+
+    // OTA_SIZE_UNKNOWN не используем: размер известен из Content-Length,
+    // и с ним драйвер стирает ровно нужное число секторов, а не весь раздел.
+    if (esp_ota_begin(s_upload_target, total_size, &s_upload_handle) != ESP_OK) {
+        ESP_LOGE(TAG, "не удалось начать запись");
+        return false;
+    }
+
+    s_upload_total = total_size;
+    s_upload_written = 0;
+    s_upload_last_percent = -1;
+    s_in_progress = true;
+
+    ESP_LOGW(TAG, "загрузка через браузер: %u КБ в раздел %s, мост остановлен",
+             (unsigned)(total_size / 1024), s_upload_target->label);
+    return true;
+}
+
+bool ota_upload_write(const uint8_t *data, size_t len)
+{
+    if (!s_in_progress || s_upload_handle == 0) {
+        return false;
+    }
+
+    if (esp_ota_write(s_upload_handle, data, len) != ESP_OK) {
+        ESP_LOGE(TAG, "ошибка записи во flash на %u байте",
+                 (unsigned)s_upload_written);
+        ota_upload_abort();
+        return false;
+    }
+
+    s_upload_written += len;
+
+    if (s_upload_total > 0) {
+        const int percent = (int)((s_upload_written * 100) / s_upload_total);
+        if (percent != s_upload_last_percent && percent % 20 == 0) {
+            s_upload_last_percent = percent;
+            ESP_LOGI(TAG, "%d%%", percent);
+        }
+    }
+    return true;
+}
+
+bool ota_upload_end(void)
+{
+    if (!s_in_progress || s_upload_handle == 0) {
+        return false;
+    }
+
+    // Проверяет контрольную сумму записанного образа. Без этого битая
+    // прошивка попала бы в загрузочный раздел.
+    const esp_err_t err = esp_ota_end(s_upload_handle);
+    s_upload_handle = 0;
+
+    if (err != ESP_OK) {
+        s_in_progress = false;
+        if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
+            ESP_LOGE(TAG, "образ не прошёл проверку — не тот файл?");
+        } else {
+            ESP_LOGE(TAG, "ошибка завершения: %s", esp_err_to_name(err));
+        }
+        return false;
+    }
+
+    if (esp_ota_set_boot_partition(s_upload_target) != ESP_OK) {
+        s_in_progress = false;
+        ESP_LOGE(TAG, "не удалось переключить загрузочный раздел");
+        return false;
+    }
+
+    ESP_LOGW(TAG, "прошивка записана (%u КБ), нужна перезагрузка",
+             (unsigned)(s_upload_written / 1024));
+
+    // Флаг снимаем: запись закончена, а до перезагрузки мост может работать.
+    s_in_progress = false;
+    return true;
+}
+
+void ota_upload_abort(void)
+{
+    if (s_upload_handle != 0) {
+        esp_ota_abort(s_upload_handle);
+        s_upload_handle = 0;
+    }
+    s_in_progress = false;
+    ESP_LOGW(TAG, "загрузка прервана, работает старая прошивка");
+}

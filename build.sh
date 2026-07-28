@@ -40,6 +40,10 @@ for ENV_NAME in $ENVS; do
   echo "=== $ENV_NAME ==="
   echo
 
+  # Синтаксис страницы проверяется до сборки: ошибка в JavaScript не видна
+  # компилятору C и проявилась бы только в браузере на плате.
+  bash tools/check_web.sh
+
   $PIO run -e "$ENV_NAME"
 
   BUILD=".pio/build/$ENV_NAME"

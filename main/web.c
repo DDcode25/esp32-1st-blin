@@ -137,6 +137,11 @@ static const char INDEX_HTML[] =
 "</main>"
 
 "<script>"
+// Перевод строки задаётся константой NL. Записать его прямо в строке
+// нельзя: escape-последовательность раскрывается ещё компилятором C,
+// и в JavaScript попадает реальный разрыв строки — а он внутри
+// строкового литерала недопустим и роняет весь скрипт.
+"const NL=String.fromCharCode(10);"
 "function g(i){return document.getElementById(i)}"
 "function roleChanged(){const a=g('role').value=='1';"
 "g('ip').value=a?'192.168.4.2':'192.168.4.1';"
@@ -198,10 +203,10 @@ static const char INDEX_HTML[] =
 "const hex=g('termview').value=='hex';const out=g('termout');"
 "let t='';let lastSrc=null;"
 "for(const it of d.data){"
-"if(it.s!==lastSrc){t+=(t?'\n':'')+(it.s?'N< ':'U< ');lastSrc=it.s}"
+"if(it.s!==lastSrc){t+=(t?NL:'')+(it.s?'N< ':'U< ');lastSrc=it.s}"
 "if(hex){t+=it.b.toString(16).padStart(2,'0')+' '}"
 "else{t+=(it.b>=32&&it.b<127)?String.fromCharCode(it.b):"
-"(it.b==10?'\n'+(lastSrc?'N< ':'U< '):'.')}}"
+"(it.b==10?NL+(lastSrc?'N< ':'U< '):'.')}}"
 "out.textContent+=t;"
 "if(out.textContent.length>4000)"
 "out.textContent=out.textContent.slice(-4000);"
@@ -209,14 +214,14 @@ static const char INDEX_HTML[] =
 "function termSend(){const v=g('terminput').value;if(!v)return;"
 "fetch('/api/term?p='+g('termport').value+'&dst='+g('termdst').value,"
 "{method:'POST',body:v}).then(()=>{"
-"g('termout').textContent+='\n> '+v+'\n';"
+"g('termout').textContent+=NL+'> '+v+NL;"
 "g('terminput').value='';"
 "g('termout').scrollTop=g('termout').scrollHeight})}"
 "let busy=false;"
 "function upload(){const f=g('fw').files[0];"
 "if(!f){alert('Сначала выбери файл firmware.bin');return}"
 "if(f.size>2000000){alert('Файл '+Math.round(f.size/1024)+' КБ — это "
-"слишком много. Похоже, выбран дамп флеша или склеенный образ.\n\n"
+"слишком много. Похоже, выбран дамп флеша или склеенный образ.'+NL+NL+'"
 "Нужен firmware.bin из .pio/build/espbridge/ (около 460 КБ).');return}"
 "if(f.name.includes('MERGED')){"
 "if(!confirm('Похоже, это склеенный образ, а не firmware.bin. "

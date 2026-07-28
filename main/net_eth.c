@@ -18,6 +18,8 @@ static const char *TAG = "eth";
 
 static volatile bool s_link_up = false;
 static esp_netif_t *s_netif = NULL;
+static esp_eth_handle_t s_eth_handle = NULL;
+static char s_peer_ip[16];
 
 // Обработчик событий драйвера Ethernet. Вызывается из системного цикла
 // событий, поэтому внутри только запись флага и логирование.
@@ -54,7 +56,7 @@ static void got_ip_handler(void *arg, esp_event_base_t base, int32_t id,
 
     ESP_LOGI(TAG, "адрес получен: " IPSTR ", маска " IPSTR,
              IP2STR(&ip->ip), IP2STR(&ip->netmask));
-    ESP_LOGI(TAG, "партнёр ожидается на %s", BRIDGE_PEER_IP);
+    ESP_LOGI(TAG, "партнёр ожидается на %s", s_peer_ip);
 }
 
 // Подаёт питание на PHY. На WT32-ETH01 LAN8720A запитан через транзистор,
@@ -76,9 +78,12 @@ static void phy_power_on(void)
     vTaskDelay(pdMS_TO_TICKS(10));
 }
 
-void eth_bridge_start(void)
+void eth_bridge_start(const char *local_ip, const char *netmask,
+                      const char *gateway, const char *peer_ip)
 {
-    ESP_LOGI(TAG, "роль %s, адрес %s", BRIDGE_ROLE_NAME, BRIDGE_LOCAL_IP);
+    strlcpy(s_peer_ip, peer_ip, sizeof(s_peer_ip));
+
+    ESP_LOGI(TAG, "роль %s, адрес %s", BRIDGE_ROLE_NAME, local_ip);
 
     phy_power_on();
 
@@ -103,9 +108,9 @@ void eth_bridge_start(void)
     // сразу при поднятии интерфейса.
     esp_netif_ip_info_t ip_info;
     memset(&ip_info, 0, sizeof(ip_info));
-    ip_info.ip.addr = esp_ip4addr_aton(BRIDGE_LOCAL_IP);
-    ip_info.netmask.addr = esp_ip4addr_aton(BRIDGE_NETMASK);
-    ip_info.gw.addr = esp_ip4addr_aton(BRIDGE_GATEWAY);
+    ip_info.ip.addr = esp_ip4addr_aton(local_ip);
+    ip_info.netmask.addr = esp_ip4addr_aton(netmask);
+    ip_info.gw.addr = esp_ip4addr_aton(gateway);
     ESP_ERROR_CHECK(esp_netif_set_ip_info(s_netif, &ip_info));
 
     // MAC: интерфейс RMII, тактирование приходит извне на GPIO0.
@@ -133,17 +138,17 @@ void eth_bridge_start(void)
     assert(phy);
 
     esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
-    esp_eth_handle_t eth_handle = NULL;
-    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_cfg, &eth_handle));
+    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_cfg, &s_eth_handle));
 
-    ESP_ERROR_CHECK(esp_netif_attach(s_netif, esp_eth_new_netif_glue(eth_handle)));
+    ESP_ERROR_CHECK(
+        esp_netif_attach(s_netif, esp_eth_new_netif_glue(s_eth_handle)));
 
     ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID,
                                                eth_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP,
                                                got_ip_handler, NULL));
 
-    ESP_ERROR_CHECK(esp_eth_start(eth_handle));
+    ESP_ERROR_CHECK(esp_eth_start(s_eth_handle));
 
     ESP_LOGI(TAG, "ожидание линка, воткни кабель");
 }
@@ -151,4 +156,17 @@ void eth_bridge_start(void)
 bool eth_bridge_link_up(void)
 {
     return s_link_up;
+}
+
+int eth_bridge_link_speed(void)
+{
+    if (!s_link_up || !s_eth_handle) {
+        return 0;
+    }
+
+    eth_speed_t speed = ETH_SPEED_10M;
+    if (esp_eth_ioctl(s_eth_handle, ETH_CMD_G_SPEED, &speed) != ESP_OK) {
+        return 0;
+    }
+    return speed == ETH_SPEED_100M ? 100 : 10;
 }

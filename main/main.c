@@ -19,11 +19,14 @@
 #include "nvs_flash.h"
 #include "ota.h"
 #include "port.h"
+#include "settings.h"
+#include "web.h"
 
 static const char *TAG = "main";
 
 static port_t *s_port0;
 static port_t *s_port1;
+static settings_t s_settings;
 
 static void led_init(void)
 {
@@ -114,25 +117,18 @@ void app_main(void)
 
     debug_init();
     led_init();
-    eth_bridge_start();
 
-    // Оба порта стартуют в прозрачном режиме намеренно: до проверки на
-    // железе безопаснее отдавать байты как есть, а CRSF включать осознанно.
-    const port_config_t cfg0 = {
-        .baud = 400000,
-        .mode = PORT_MODE_TRANSPARENT,
-        .pps = 150,
-    };
-    const port_config_t cfg1 = {
-        .baud = 57600,
-        .mode = PORT_MODE_TRANSPARENT,
-        .pps = 150,
-    };
+    settings_load(&s_settings);
+
+    eth_bridge_start(s_settings.local_ip, s_settings.netmask,
+                     s_settings.gateway, s_settings.peer_ip);
 
     s_port0 = port_create(PORT0_UART_NUM, PORT0_TX_GPIO, PORT0_RX_GPIO,
-                          PORT0_UDP_PORT, BRIDGE_PEER_IP, "port0", &cfg0);
+                          PORT0_UDP_PORT, s_settings.peer_ip, "port0",
+                          &s_settings.port0);
     s_port1 = port_create(PORT1_UART_NUM, PORT1_TX_GPIO, PORT1_RX_GPIO,
-                          PORT1_UDP_PORT, BRIDGE_PEER_IP, "port1", &cfg1);
+                          PORT1_UDP_PORT, s_settings.peer_ip, "port1",
+                          &s_settings.port1);
 
     if (!s_port0 || !s_port1) {
         ESP_LOGE(TAG, "не удалось создать порты, мост не работает");
@@ -140,6 +136,7 @@ void app_main(void)
     }
 
     ota_start();
+    web_start(s_port0, s_port1, &s_settings);
     console_start(s_port0, s_port1);
 
     xTaskCreate(status_task, "status", 2048, NULL, 3, NULL);

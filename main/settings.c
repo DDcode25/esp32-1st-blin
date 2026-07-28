@@ -1,0 +1,144 @@
+#include "settings.h"
+
+#include <stdio.h>
+#include <string.h>
+
+#include "config.h"
+#include "esp_log.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+
+static const char *TAG = "cfg";
+static const char *NS = "espbridge";
+
+bool settings_valid_ip(const char *s)
+{
+    if (!s || !*s) {
+        return false;
+    }
+
+    unsigned a, b, c, d;
+    char extra;
+    // Лишний %c ловит мусор в хвосте: "1.2.3.4abc" иначе прошло бы.
+    if (sscanf(s, "%u.%u.%u.%u%c", &a, &b, &c, &d, &extra) != 4) {
+        return false;
+    }
+    return a < 256 && b < 256 && c < 256 && d < 256;
+}
+
+static void load_str(nvs_handle_t nvs, const char *key, char *out,
+                     size_t cap, const char *fallback)
+{
+    size_t len = cap;
+    if (nvs_get_str(nvs, key, out, &len) != ESP_OK) {
+        strlcpy(out, fallback, cap);
+    }
+}
+
+void settings_load(settings_t *out)
+{
+    memset(out, 0, sizeof(*out));
+
+    // Значения по умолчанию — из config.h, то есть зависят от роли,
+    // заданной флагом сборки.
+    strlcpy(out->local_ip, BRIDGE_LOCAL_IP, IP_STR_LEN);
+    strlcpy(out->netmask, BRIDGE_NETMASK, IP_STR_LEN);
+    strlcpy(out->gateway, BRIDGE_GATEWAY, IP_STR_LEN);
+    strlcpy(out->peer_ip, BRIDGE_PEER_IP, IP_STR_LEN);
+
+    out->port0.baud = 400000;
+    out->port0.mode = PORT_MODE_TRANSPARENT;
+    out->port0.pps = 150;
+
+    out->port1.baud = 57600;
+    out->port1.mode = PORT_MODE_TRANSPARENT;
+    out->port1.pps = 150;
+
+    nvs_handle_t nvs;
+    if (nvs_open(NS, NVS_READONLY, &nvs) != ESP_OK) {
+        ESP_LOGI(TAG, "сохранённых настроек нет, взяты значения по умолчанию");
+        return;
+    }
+
+    load_str(nvs, "ip", out->local_ip, IP_STR_LEN, out->local_ip);
+    load_str(nvs, "mask", out->netmask, IP_STR_LEN, out->netmask);
+    load_str(nvs, "gw", out->gateway, IP_STR_LEN, out->gateway);
+    load_str(nvs, "peer", out->peer_ip, IP_STR_LEN, out->peer_ip);
+
+    uint32_t u32;
+    uint8_t u8;
+    uint16_t u16;
+
+    if (nvs_get_u32(nvs, "p0baud", &u32) == ESP_OK) out->port0.baud = u32;
+    if (nvs_get_u8(nvs, "p0mode", &u8) == ESP_OK) out->port0.mode = u8;
+    if (nvs_get_u16(nvs, "p0pps", &u16) == ESP_OK) out->port0.pps = u16;
+
+    if (nvs_get_u32(nvs, "p1baud", &u32) == ESP_OK) out->port1.baud = u32;
+    if (nvs_get_u8(nvs, "p1mode", &u8) == ESP_OK) out->port1.mode = u8;
+    if (nvs_get_u16(nvs, "p1pps", &u16) == ESP_OK) out->port1.pps = u16;
+
+    nvs_close(nvs);
+
+    ESP_LOGI(TAG, "настройки: %s -> %s", out->local_ip, out->peer_ip);
+}
+
+bool settings_save(const settings_t *s)
+{
+    // Некорректный адрес, сохранённый в NVS, сделает плату недоступной по
+    // сети после перезагрузки, и вернуть её можно будет только по проводу.
+    if (!settings_valid_ip(s->local_ip) || !settings_valid_ip(s->netmask) ||
+        !settings_valid_ip(s->gateway) || !settings_valid_ip(s->peer_ip)) {
+        ESP_LOGE(TAG, "отказ: неверный формат адреса");
+        return false;
+    }
+
+    nvs_handle_t nvs;
+    if (nvs_open(NS, NVS_READWRITE, &nvs) != ESP_OK) {
+        return false;
+    }
+
+    nvs_set_str(nvs, "ip", s->local_ip);
+    nvs_set_str(nvs, "mask", s->netmask);
+    nvs_set_str(nvs, "gw", s->gateway);
+    nvs_set_str(nvs, "peer", s->peer_ip);
+
+    nvs_set_u32(nvs, "p0baud", s->port0.baud);
+    nvs_set_u8(nvs, "p0mode", (uint8_t)s->port0.mode);
+    nvs_set_u16(nvs, "p0pps", s->port0.pps);
+
+    nvs_set_u32(nvs, "p1baud", s->port1.baud);
+    nvs_set_u8(nvs, "p1mode", (uint8_t)s->port1.mode);
+    nvs_set_u16(nvs, "p1pps", s->port1.pps);
+
+    const esp_err_t err = nvs_commit(nvs);
+    nvs_close(nvs);
+
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "настройки сохранены");
+        return true;
+    }
+    return false;
+}
+
+bool settings_reset(void)
+{
+    nvs_handle_t nvs;
+    if (nvs_open(NS, NVS_READWRITE, &nvs) != ESP_OK) {
+        return false;
+    }
+
+    // Стираем только свои ключи: флаги отладки лежат в том же пространстве
+    // имён и к сетевым настройкам отношения не имеют.
+    const char *keys[] = {"ip", "mask", "gw", "peer",
+                          "p0baud", "p0mode", "p0pps",
+                          "p1baud", "p1mode", "p1pps"};
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
+        nvs_erase_key(nvs, keys[i]);
+    }
+
+    const esp_err_t err = nvs_commit(nvs);
+    nvs_close(nvs);
+
+    ESP_LOGW(TAG, "настройки сброшены к значениям по умолчанию");
+    return err == ESP_OK;
+}

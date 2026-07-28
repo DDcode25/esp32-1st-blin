@@ -399,7 +399,11 @@ static esp_err_t update_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    uint8_t *buf = malloc(4096);
+    // Порция 2 КБ: соответствует типичному сегменту TCP и не заставляет
+    // обработчик надолго уходить из чтения сокета.
+    enum { CHUNK = 2048, MAX_TIMEOUTS = 20 };
+
+    uint8_t *buf = malloc(CHUNK);
     if (!buf) {
         ota_upload_abort();
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "no memory");
@@ -407,13 +411,30 @@ static esp_err_t update_handler(httpd_req_t *req)
     }
 
     size_t received = 0;
+    int timeouts = 0;
+
     while (received < total) {
-        const size_t want = (total - received) < 4096 ? (total - received) : 4096;
+        const size_t want = (total - received) < CHUNK ? (total - received)
+                                                       : CHUNK;
         const int n = httpd_req_recv(req, (char *)buf, want);
 
         if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            // Единичные таймауты нормальны — данные ещё в пути. Но крутиться
+            // вечно нельзя: при реальном обрыве мост остался бы остановленным
+            // навсегда.
+            if (++timeouts > MAX_TIMEOUTS) {
+                ESP_LOGE(TAG, "приём прерван: нет данных на %u из %u байт",
+                         (unsigned)received, (unsigned)total);
+                free(buf);
+                ota_upload_abort();
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                    "timeout");
+                return ESP_FAIL;
+            }
             continue;
         }
+        timeouts = 0;
+
         if (n <= 0) {
             free(buf);
             ota_upload_abort();
@@ -472,16 +493,27 @@ void web_start(port_t *port0, port_t *port1, settings_t *settings)
     s_settings = settings;
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.lru_purge_enable = true;
+
     // Приоритет ниже, чем у задач моста: веб-интерфейс не должен отнимать
     // время у передачи данных.
     cfg.task_priority = 4;
+
     // Загрузка прошивки занимает десятки секунд — стандартных 5 с мало.
     cfg.recv_wait_timeout = 30;
     cfg.send_wait_timeout = 30;
-    // Обработчик update_handler держит соединение долго; стек по умолчанию
-    // мал для работы с буфером в 4 КБ и вызовами esp_ota_write.
+
+    // Обработчик update_handler держит соединение долго и работает с
+    // буфером и вызовами esp_ota_write; стека по умолчанию не хватает.
     cfg.stack_size = 8192;
+
+    // Запас соединений: во время загрузки прошивки браузер может держать
+    // открытыми и другие. При нехватке сервер закрывает наименее свежее —
+    // и под нож попадает именно долгая загрузка.
+    cfg.max_open_sockets = 7;
+
+    // lru_purge отключён по той же причине: он закрывает долгоживущие
+    // соединения, а загрузка прошивки — самое долгое из них.
+    cfg.lru_purge_enable = false;
 
     httpd_handle_t server = NULL;
     if (httpd_start(&server, &cfg) != ESP_OK) {

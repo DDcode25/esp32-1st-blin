@@ -363,9 +363,15 @@ bool ota_upload_begin(size_t total_size)
         return false;
     }
 
-    // OTA_SIZE_UNKNOWN не используем: размер известен из Content-Length,
-    // и с ним драйвер стирает ровно нужное число секторов, а не весь раздел.
-    if (esp_ota_begin(s_upload_target, total_size, &s_upload_handle) != ESP_OK) {
+    // OTA_WITH_SEQUENTIAL_WRITES, а не точный размер. С точным размером
+    // драйвер стирает весь нужный участок флеша одним вызовом — для 460 КБ
+    // это несколько секунд, в течение которых обработчик не читает сокет.
+    // Буферы TCP переполняются, и браузер получает обрыв связи.
+    //
+    // В этом режиме стирание идёт порциями по мере записи, и длинных пауз
+    // не возникает.
+    if (esp_ota_begin(s_upload_target, OTA_WITH_SEQUENTIAL_WRITES,
+                      &s_upload_handle) != ESP_OK) {
         ESP_LOGE(TAG, "не удалось начать запись");
         return false;
     }

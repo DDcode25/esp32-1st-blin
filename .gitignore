@@ -1,0 +1,37 @@
+# --- PlatformIO ---
+# Скачанные фреймворки, toolchain и объектные файлы. Сотни мегабайт,
+# восстанавливаются автоматически при первой сборке.
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# --- Собранные прошивки ---
+# Публикуются через GitHub Releases, а не хранятся в репозитории.
+dist/
+*.bin
+*.elf
+*.map
+
+# --- Архивы для передачи ---
+*.rar
+*.zip
+*.7z
+
+# --- Дампы флеша ---
+# Снятые с плат образы чужих прошивок — не наше и не для публикации.
+*-original.bin
+*_dump.bin
+
+# --- Редакторы и IDE ---
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*~
+
+# --- ОС ---
+Thumbs.db
+desktop.ini
+.DS_Store

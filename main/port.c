@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "lwip/sockets.h"
 #include "net_eth.h"
+#include "ota.h"
 
 struct port_s {
     uart_port_t uart_num;
@@ -65,6 +66,14 @@ static void uart_to_net_task(void *arg)
     uint8_t buf[UDP_PACKET_MAX];
 
     while (1) {
+        // Во время записи прошивки мост простаивает: задачи портов имеют
+        // более высокий приоритет, чем веб-сервер, и отбирали бы у него
+        // время, из-за чего приём файла рвался.
+        if (ota_in_progress()) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         // Читаем с таймаутом, равным окну агрегации: драйвер вернёт данные
         // либо по заполнению буфера, либо по истечении окна. Так редкий
         // поток не залипает в ожидании, пока буфер наполнится, а частый
@@ -109,6 +118,11 @@ static void net_to_uart_task(void *arg)
     uint8_t buf[UDP_PACKET_MAX];
 
     while (1) {
+        if (ota_in_progress()) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+
         const int n = recv(p->sock, buf, sizeof(buf), 0);
         if (n <= 0) {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -164,6 +178,11 @@ static void pace_task_fn(void *arg)
 
     while (1) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        if (ota_in_progress()) {
+            continue;
+        }
+
         debug_timing_tick(&timing);
 
         if (port_mode(p) != PORT_MODE_CRSF) {

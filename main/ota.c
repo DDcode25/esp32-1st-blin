@@ -379,6 +379,9 @@ bool ota_upload_begin(size_t total_size)
     s_upload_total = total_size;
     s_upload_written = 0;
     s_upload_last_percent = -1;
+
+    // Флаг ставится до первой записи: задачи моста читают его и уходят
+    // в простой, освобождая процессорное время для приёма файла.
     s_in_progress = true;
 
     ESP_LOGW(TAG, "загрузка через браузер: %u КБ в раздел %s, мост остановлен",

@@ -393,6 +393,8 @@ static esp_err_t update_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    ESP_LOGI(TAG, "приём прошивки: %u байт", (unsigned)total);
+
     if (!ota_upload_begin(total)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                             "cannot start");
@@ -436,6 +438,8 @@ static esp_err_t update_handler(httpd_req_t *req)
         timeouts = 0;
 
         if (n <= 0) {
+            ESP_LOGE(TAG, "обрыв на %u из %u байт (код %d)",
+                     (unsigned)received, (unsigned)total, n);
             free(buf);
             ota_upload_abort();
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
@@ -453,6 +457,7 @@ static esp_err_t update_handler(httpd_req_t *req)
     }
 
     free(buf);
+    ESP_LOGI(TAG, "принято %u байт, проверка образа", (unsigned)received);
 
     if (!ota_upload_end()) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,

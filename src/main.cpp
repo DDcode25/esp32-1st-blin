@@ -26,23 +26,45 @@ BridgePort g_port1(PORT1_UART_NUM, PORT1_TX_PIN, PORT1_RX_PIN, PORT1_UDP_PORT,
 uint32_t g_lastLedMillis = 0;
 bool g_ledState = false;
 
+// Во время записи во flash мост не обслуживается: приём данных мешает
+// записи, а прерванная прошивка оставляет плату неработоспособной.
+bool g_otaInProgress = false;
+
 void setupOta() {
   ArduinoOTA.setHostname(BRIDGE_HOSTNAME);
 
+  // Без пароля любой в сети может залить свою прошивку. Пока это прямой
+  // кабель между двумя платами — риск невелик, но мост рассчитан и на работу
+  // через общую сеть, где открытая OTA недопустима.
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+
   ArduinoOTA.onStart([]() {
-    // Во время прошивки мост не работает — глушим порты, чтобы приём данных
-    // не мешал записи во flash.
+    g_otaInProgress = true;
     Serial.println("[ota] начало прошивки, мост остановлен");
   });
-  ArduinoOTA.onEnd([]() { Serial.println("\n[ota] прошивка завершена"); });
+  ArduinoOTA.onEnd([]() {
+    g_otaInProgress = false;
+    Serial.println("\n[ota] прошивка завершена, перезагрузка");
+  });
   ArduinoOTA.onProgress([](unsigned int done, unsigned int total) {
     Serial.printf("[ota] %u%%\r", (done * 100) / total);
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("[ota] ОШИБКА %u\n", error);
+    g_otaInProgress = false;
+    Serial.printf("[ota] ОШИБКА %u: ", error);
+    switch (error) {
+      case OTA_AUTH_ERROR:    Serial.println("неверный пароль"); break;
+      case OTA_BEGIN_ERROR:   Serial.println("не удалось начать"); break;
+      case OTA_CONNECT_ERROR: Serial.println("обрыв соединения"); break;
+      case OTA_RECEIVE_ERROR: Serial.println("ошибка приёма"); break;
+      case OTA_END_ERROR:     Serial.println("не удалось завершить"); break;
+      default:                Serial.println("неизвестная"); break;
+    }
   });
 
   ArduinoOTA.begin();
+  Serial.printf("[ota] готов на %s, порт 3232\n",
+                BRIDGE_LOCAL_IP.toString().c_str());
 }
 
 // Индикация: линка нет — редкое мигание, линк есть но партнёр молчит —
@@ -100,6 +122,15 @@ void setup() {
 }
 
 void loop() {
+  ArduinoOTA.handle();
+
+  if (g_otaInProgress) {
+    // Идёт запись во flash. Всё остальное отключено: обслуживание портов
+    // отнимает время у записи, а прерванная прошивка означает неработающую
+    // плату до перепрошивки по проводу.
+    return;
+  }
+
   // Порты опрашиваются первыми и без задержек: задержка здесь напрямую
   // становится задержкой моста.
   g_port0.poll();
@@ -107,7 +138,6 @@ void loop() {
 
   ethLoop();
   webLoop();
-  ArduinoOTA.handle();
 
   updateStatusLed();
 }

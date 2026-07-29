@@ -433,23 +433,42 @@ const char *port_name(port_t *p)
 void port_terminal_send(port_t *p, const uint8_t *data, size_t len,
                         bool to_uart, bool to_net)
 {
+    int written = -1;
+    int sent = -1;
+
     if (to_uart) {
-        const int written = uart_write_bytes(p->uart_num, data, len);
+        written = uart_write_bytes(p->uart_num, data, len);
         if (written > 0) {
             p->stats.uart_tx_bytes += written;
         }
     }
 
-    if (to_net && eth_bridge_link_up()) {
-        const int sent = sendto(p->sock, data, len, 0,
-                                (struct sockaddr *)&p->peer_addr,
-                                sizeof(p->peer_addr));
-        if (sent == (int)len) {
-            p->stats.udp_tx_packets++;
-        } else {
+    if (to_net) {
+        if (!eth_bridge_link_up()) {
+            // Без линка отправлять некуда. Считаем как потерю, иначе
+            // молчание выглядело бы как успешная отправка.
             p->stats.udp_tx_dropped++;
+        } else {
+            sent = sendto(p->sock, data, len, 0,
+                          (struct sockaddr *)&p->peer_addr,
+                          sizeof(p->peer_addr));
+            if (sent == (int)len) {
+                p->stats.udp_tx_packets++;
+            } else {
+                p->stats.udp_tx_dropped++;
+            }
         }
     }
+
+    // Результат в лог: по нему видно, ушли ли байты на самом деле,
+    // а не только то, что страница приняла нажатие кнопки.
+    ESP_LOGI(TAG, "[%s] терминал: %u Б -> UART %s, сеть %s", p->name,
+             (unsigned)len,
+             !to_uart ? "не запрошен" : (written == (int)len ? "ок" : "ОШИБКА"),
+             !to_net ? "не запрошена"
+                     : (sent == (int)len ? "ок"
+                                         : (eth_bridge_link_up() ? "ОШИБКА"
+                                                                 : "нет линка")));
 }
 
 size_t port_terminal_read(port_t *p, uint32_t *from, uint8_t *out,

@@ -29,6 +29,13 @@ typedef struct {
     int8_t rx;
 } port_pins_t;
 
+// UDP-порты. Обычно совпадают, но разведены отдельно: наземная станция
+// может ждать данные на своём порту, отличном от того, где слушает плата.
+typedef struct {
+    uint16_t local;
+    uint16_t remote;
+} port_udp_t;
+
 typedef struct {
     bridge_role_t role;
     char local_ip[IP_STR_LEN];
@@ -41,6 +48,9 @@ typedef struct {
 
     port_pins_t pins0;
     port_pins_t pins1;
+
+    port_udp_t udp0;
+    port_udp_t udp1;
 } settings_t;
 
 // Проверяет, годится ли пин для UART на WT32-ETH01.

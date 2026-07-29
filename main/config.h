@@ -69,10 +69,13 @@
 #define BRIDGE_AIR_IP           "192.168.4.2"
 #define BRIDGE_AIR_PEER         "192.168.4.1"
 
-// UDP-порты: каждый порт данных получает свой, чтобы потоки CRSF и MAVLink
-// не смешивались и могли иметь разную политику доставки.
+// UDP-порты по умолчанию. Каждый порт данных получает свой, чтобы потоки
+// CRSF и MAVLink не смешивались.
+//
+// 14550 — стандартный порт MAVLink, его ждут QGroundControl и Mission
+// Planner. Меняются через веб-интерфейс.
 #define PORT0_UDP_PORT          14551
-#define PORT1_UDP_PORT          14552
+#define PORT1_UDP_PORT          14550
 
 #define BRIDGE_HOSTNAME         "espbridge"
 

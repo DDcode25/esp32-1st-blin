@@ -124,6 +124,11 @@ void settings_load(settings_t *out)
     out->pins1.tx = PORT1_TX_GPIO;
     out->pins1.rx = PORT1_RX_GPIO;
 
+    out->udp0.local = PORT0_UDP_PORT;
+    out->udp0.remote = PORT0_UDP_PORT;
+    out->udp1.local = PORT1_UDP_PORT;
+    out->udp1.remote = PORT1_UDP_PORT;
+
     nvs_handle_t nvs;
     if (nvs_open(NS, NVS_READONLY, &nvs) != ESP_OK) {
         ESP_LOGI(TAG, "сохранённых настроек нет, взяты значения по умолчанию");
@@ -159,12 +164,19 @@ void settings_load(settings_t *out)
     if (nvs_get_i8(nvs, "p1tx", &i8) == ESP_OK) out->pins1.tx = i8;
     if (nvs_get_i8(nvs, "p1rx", &i8) == ESP_OK) out->pins1.rx = i8;
 
+    if (nvs_get_u16(nvs, "p0ul", &u16) == ESP_OK) out->udp0.local = u16;
+    if (nvs_get_u16(nvs, "p0ur", &u16) == ESP_OK) out->udp0.remote = u16;
+    if (nvs_get_u16(nvs, "p1ul", &u16) == ESP_OK) out->udp1.local = u16;
+    if (nvs_get_u16(nvs, "p1ur", &u16) == ESP_OK) out->udp1.remote = u16;
+
     nvs_close(nvs);
 
     ESP_LOGI(TAG, "роль %s, %s -> %s", settings_role_name(out->role),
              out->local_ip, out->peer_ip);
-    ESP_LOGI(TAG, "порт 0: TX=GPIO%d RX=GPIO%d, порт 1: TX=GPIO%d RX=GPIO%d",
-             out->pins0.tx, out->pins0.rx, out->pins1.tx, out->pins1.rx);
+    ESP_LOGI(TAG, "порт 0: TX=GPIO%d RX=GPIO%d, UDP %u->%u",
+             out->pins0.tx, out->pins0.rx, out->udp0.local, out->udp0.remote);
+    ESP_LOGI(TAG, "порт 1: TX=GPIO%d RX=GPIO%d, UDP %u->%u",
+             out->pins1.tx, out->pins1.rx, out->udp1.local, out->udp1.remote);
 }
 
 bool settings_save(const settings_t *s)
@@ -201,6 +213,11 @@ bool settings_save(const settings_t *s)
     nvs_set_i8(nvs, "p1tx", s->pins1.tx);
     nvs_set_i8(nvs, "p1rx", s->pins1.rx);
 
+    nvs_set_u16(nvs, "p0ul", s->udp0.local);
+    nvs_set_u16(nvs, "p0ur", s->udp0.remote);
+    nvs_set_u16(nvs, "p1ul", s->udp1.local);
+    nvs_set_u16(nvs, "p1ur", s->udp1.remote);
+
     const esp_err_t err = nvs_commit(nvs);
     nvs_close(nvs);
 
@@ -223,7 +240,8 @@ bool settings_reset(void)
     const char *keys[] = {"role", "ip", "mask", "gw", "peer",
                           "p0baud", "p0mode", "p0pps",
                           "p1baud", "p1mode", "p1pps",
-                          "p0tx", "p0rx", "p1tx", "p1rx"};
+                          "p0tx", "p0rx", "p1tx", "p1rx",
+                          "p0ul", "p0ur", "p1ul", "p1ur"};
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         nvs_erase_key(nvs, keys[i]);
     }

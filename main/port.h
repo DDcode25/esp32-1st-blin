@@ -57,7 +57,8 @@ typedef struct port_s port_t;
 
 // Создаёт и запускает порт. Вызывать после подъёма Ethernet.
 port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
-                    uint16_t udp_port, const char *peer_ip, const char *name,
+                    uint16_t local_port, uint16_t remote_port,
+                    const char *peer_ip, const char *name,
                     const port_config_t *cfg);
 
 // Меняет конфигурацию на лету, без перезапуска задач.

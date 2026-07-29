@@ -20,7 +20,8 @@ struct port_s {
     uart_port_t uart_num;
     int tx_gpio;
     int rx_gpio;
-    uint16_t udp_port;
+    uint16_t local_port;
+    uint16_t remote_port;
     const char *name;
 
     int sock;
@@ -280,11 +281,12 @@ static bool setup_socket(port_t *p, const char *peer_ip)
 
     struct sockaddr_in local = {
         .sin_family = AF_INET,
-        .sin_port = htons(p->udp_port),
+        .sin_port = htons(p->local_port),
         .sin_addr.s_addr = htonl(INADDR_ANY),
     };
     if (bind(p->sock, (struct sockaddr *)&local, sizeof(local)) < 0) {
-        ESP_LOGE(TAG, "[%s] не удалось занять порт %u", p->name, p->udp_port);
+        ESP_LOGE(TAG, "[%s] не удалось занять порт %u", p->name,
+                 p->local_port);
         close(p->sock);
         p->sock = -1;
         return false;
@@ -297,14 +299,15 @@ static bool setup_socket(port_t *p, const char *peer_ip)
 
     memset(&p->peer_addr, 0, sizeof(p->peer_addr));
     p->peer_addr.sin_family = AF_INET;
-    p->peer_addr.sin_port = htons(p->udp_port);
+    p->peer_addr.sin_port = htons(p->remote_port);
     p->peer_addr.sin_addr.s_addr = inet_addr(peer_ip);
 
     return true;
 }
 
 port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
-                    uint16_t udp_port, const char *peer_ip, const char *name,
+                    uint16_t local_port, uint16_t remote_port,
+                    const char *peer_ip, const char *name,
                     const port_config_t *cfg)
 {
     port_t *p = calloc(1, sizeof(port_t));
@@ -315,7 +318,8 @@ port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
     p->uart_num = uart_num;
     p->tx_gpio = tx_gpio;
     p->rx_gpio = rx_gpio;
-    p->udp_port = udp_port;
+    p->local_port = local_port;
+    p->remote_port = remote_port;
     p->name = name;
     p->cfg = *cfg;
     p->sock = -1;
@@ -366,11 +370,10 @@ port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
         esp_timer_start_periodic(p->pace_timer, 1000000UL / cfg->pps);
     }
 
-    ESP_LOGI(TAG, "[%s] %lu бод, режим %s%s, TX=%d RX=%d, UDP :%u -> %s:%u",
+    ESP_LOGI(TAG, "[%s] %lu бод, %s, TX=GPIO%d RX=GPIO%d, UDP :%u -> %s:%u",
              name, (unsigned long)cfg->baud,
              cfg->mode == PORT_MODE_CRSF ? "CRSF" : "прозрачный",
-             cfg->mode == PORT_MODE_CRSF ? "" : "",
-             tx_gpio, rx_gpio, udp_port, peer_ip, udp_port);
+             tx_gpio, rx_gpio, local_port, peer_ip, remote_port);
 
     return p;
 }

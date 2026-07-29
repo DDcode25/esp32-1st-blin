@@ -38,4 +38,6 @@ if command -v node >/dev/null 2>&1; then
   fi
 else
   echo "  проверка страницы пропущена: node не установлен"
+  echo "    (ставится так: sudo apt install nodejs — эта проверка ловит"
+  echo "     ошибки в JavaScript, из-за которых страница молча ломается)"
 fi

@@ -27,11 +27,29 @@ set -e
 
 ENVS="espbridge"
 
+# PlatformIO ставится по-разному: в PATH, в собственное виртуальное
+# окружение (так делает расширение VS Code) или как модуль Python.
+# Перебираем варианты, а не полагаемся на один.
 if command -v pio >/dev/null 2>&1; then
   PIO="pio"
-else
+elif [ -x "$HOME/.platformio/penv/bin/pio" ]; then
+  PIO="$HOME/.platformio/penv/bin/pio"
+elif [ -x "$HOME/.platformio/penv/Scripts/pio.exe" ]; then
+  PIO="$HOME/.platformio/penv/Scripts/pio.exe"
+elif python3 -c "import platformio" 2>/dev/null; then
   PIO="python3 -m platformio"
+elif python -c "import platformio" 2>/dev/null; then
+  PIO="python -m platformio"
+else
+  echo "ОШИБКА: PlatformIO не найден."
+  echo
+  echo "Установить:            pip install platformio"
+  echo "Либо, если он есть в окружении VS Code, добавить в PATH:"
+  echo "  export PATH=\"\$PATH:\$HOME/.platformio/penv/bin\""
+  exit 1
 fi
+
+echo "PlatformIO: $PIO"
 
 mkdir -p out
 

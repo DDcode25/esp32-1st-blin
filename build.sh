@@ -118,11 +118,25 @@ echo
 echo "=== Готово ==="
 ls -la out/
 echo
-echo "Заливать на ОБЕ платы одинаково (порт подставить свой):"
+echo "Заливать на ОБЕ платы один и тот же файл."
 echo
-echo "  esptool --chip esp32 --port COM15 --baud 921600 write-flash -z \\"
-echo "    --flash-mode dio --flash-freq 80m --flash-size 4MB \\"
-echo "    0x0 out/espbridge_MERGED.bin"
+if grep -qi microsoft /proc/version 2>/dev/null; then
+  # В WSL порты Windows не видны: COM-порт существует только на стороне
+  # хоста. Копируем файл туда и заливаем оттуда.
+  echo "Ты в WSL — COM-порты отсюда не видны. Скопируй образ в Windows:"
+  echo
+  echo "  cp out/espbridge_MERGED.bin /mnt/c/путь/к/папке/с/esptool/"
+  echo
+  echo "и залей из командной строки Windows:"
+  echo
+  echo "  esptool.exe --chip esp32 --port COM15 --baud 921600 write-flash -z \\"
+  echo "    --flash-mode dio --flash-freq 80m --flash-size 4MB \\"
+  echo "    0x0 espbridge_MERGED.bin"
+else
+  echo "  esptool --chip esp32 --port /dev/ttyUSB0 --baud 921600 write-flash -z \\"
+  echo "    --flash-mode dio --flash-freq 80m --flash-size 4MB \\"
+  echo "    0x0 out/espbridge_MERGED.bin"
+fi
 echo
 echo "После заливки первая плата поднимется на 192.168.4.1 как GROUND."
 echo "Вторую настроить через веб-интерфейс: роль AIR, адрес 192.168.4.2."

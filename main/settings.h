@@ -21,6 +21,14 @@ typedef enum {
     ROLE_AIR = 1,
 } bridge_role_t;
 
+// Пины порта. Меняются только с перезагрузкой: переназначить UART на лету
+// нельзя — драйвер уже установлен, и смена пинов оставила бы порт
+// в неопределённом состоянии.
+typedef struct {
+    int8_t tx;
+    int8_t rx;
+} port_pins_t;
+
 typedef struct {
     bridge_role_t role;
     char local_ip[IP_STR_LEN];
@@ -30,7 +38,14 @@ typedef struct {
 
     port_config_t port0;
     port_config_t port1;
+
+    port_pins_t pins0;
+    port_pins_t pins1;
 } settings_t;
+
+// Проверяет, годится ли пин для UART на WT32-ETH01.
+// reason заполняется пояснением, если пин негоден или проблемный.
+bool settings_pin_usable(int pin, bool for_tx, const char **reason);
 
 // Читает настройки из NVS. Отсутствующие поля берутся из config.h —
 // значений по умолчанию для роли, заданной при сборке.

@@ -122,12 +122,12 @@ void app_main(void)
     eth_bridge_start(s_settings.local_ip, s_settings.netmask,
                      s_settings.gateway, s_settings.peer_ip);
 
-    s_port0 = port_create(PORT0_UART_NUM, PORT0_TX_GPIO, PORT0_RX_GPIO,
-                          PORT0_UDP_PORT, s_settings.peer_ip, "port0",
-                          &s_settings.port0);
-    s_port1 = port_create(PORT1_UART_NUM, PORT1_TX_GPIO, PORT1_RX_GPIO,
-                          PORT1_UDP_PORT, s_settings.peer_ip, "port1",
-                          &s_settings.port1);
+    s_port0 = port_create(PORT0_UART_NUM, s_settings.pins0.tx,
+                          s_settings.pins0.rx, PORT0_UDP_PORT,
+                          s_settings.peer_ip, "port0", &s_settings.port0);
+    s_port1 = port_create(PORT1_UART_NUM, s_settings.pins1.tx,
+                          s_settings.pins1.rx, PORT1_UDP_PORT,
+                          s_settings.peer_ip, "port1", &s_settings.port1);
 
     if (!s_port0 || !s_port1) {
         ESP_LOGE(TAG, "не удалось создать порты, мост не работает");

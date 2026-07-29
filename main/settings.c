@@ -16,6 +16,66 @@ const char *settings_role_name(bridge_role_t role)
     return role == ROLE_AIR ? "AIR" : "GROUND";
 }
 
+// Пригодность GPIO под UART на WT32-ETH01.
+//
+// Часть выводов занята интерфейсом RMII к LAN8720A, часть работает только
+// на вход, часть участвует в загрузке. Проверка не запрещает сомнительные
+// варианты — только предупреждает: разводка плат встречается разная,
+// и запрет мешал бы там, где на практике всё работает.
+bool settings_pin_usable(int pin, bool for_tx, const char **reason)
+{
+    static const char *ok = NULL;
+    *reason = ok;
+
+    switch (pin) {
+    // Заняты интерфейсом RMII — трогать нельзя, Ethernet перестанет работать.
+    case 0:  *reason = "занят: тактирование RMII 50 МГц"; return false;
+    case 18: *reason = "занят: MDIO интерфейса Ethernet"; return false;
+    case 19: case 21: case 22: case 25: case 26: case 27:
+        *reason = "занят: линии данных RMII"; return false;
+    case 23: *reason = "занят: MDC интерфейса Ethernet"; return false;
+    case 16: *reason = "занят: питание PHY"; return false;
+
+    // Порт прошивки и отладочного лога.
+    case 1: case 3:
+        *reason = "занят: UART0, прошивка и лог"; return false;
+
+    // Только вход — под TX не годятся.
+    case 35: case 36: case 39:
+        if (for_tx) {
+            *reason = "только вход, TX невозможен";
+            return false;
+        }
+        *reason = "только вход, без внутренней подтяжки";
+        return true;
+
+    // Работают, но с оговорками при загрузке.
+    case 12:
+        *reason = "плата не загрузится, если при старте высокий уровень";
+        return true;
+    case 15:
+        *reason = "при высоком уровне на старте выводится загрузочный лог";
+        return true;
+    case 14:
+        *reason = "выдаёт PWM в момент загрузки";
+        return true;
+    case 2:
+        *reason = "мешает входу в режим прошивки при высоком уровне";
+        return true;
+    case 5: case 17:
+        *reason = "на линии светодиод — нагрузка искажает фронты сигнала";
+        return true;
+
+    // Чистые.
+    case 4: case 32: case 33:
+        return true;
+
+    default:
+        *reason = "нет на этой плате или не выведен наружу";
+        return false;
+    }
+}
+
 bool settings_valid_ip(const char *s)
 {
     if (!s || !*s) {
@@ -59,6 +119,11 @@ void settings_load(settings_t *out)
     out->port1.mode = PORT_MODE_TRANSPARENT;
     out->port1.pps = 150;
 
+    out->pins0.tx = PORT0_TX_GPIO;
+    out->pins0.rx = PORT0_RX_GPIO;
+    out->pins1.tx = PORT1_TX_GPIO;
+    out->pins1.rx = PORT1_RX_GPIO;
+
     nvs_handle_t nvs;
     if (nvs_open(NS, NVS_READONLY, &nvs) != ESP_OK) {
         ESP_LOGI(TAG, "сохранённых настроек нет, взяты значения по умолчанию");
@@ -88,10 +153,18 @@ void settings_load(settings_t *out)
     if (nvs_get_u8(nvs, "p1mode", &u8) == ESP_OK) out->port1.mode = u8;
     if (nvs_get_u16(nvs, "p1pps", &u16) == ESP_OK) out->port1.pps = u16;
 
+    int8_t i8;
+    if (nvs_get_i8(nvs, "p0tx", &i8) == ESP_OK) out->pins0.tx = i8;
+    if (nvs_get_i8(nvs, "p0rx", &i8) == ESP_OK) out->pins0.rx = i8;
+    if (nvs_get_i8(nvs, "p1tx", &i8) == ESP_OK) out->pins1.tx = i8;
+    if (nvs_get_i8(nvs, "p1rx", &i8) == ESP_OK) out->pins1.rx = i8;
+
     nvs_close(nvs);
 
     ESP_LOGI(TAG, "роль %s, %s -> %s", settings_role_name(out->role),
              out->local_ip, out->peer_ip);
+    ESP_LOGI(TAG, "порт 0: TX=GPIO%d RX=GPIO%d, порт 1: TX=GPIO%d RX=GPIO%d",
+             out->pins0.tx, out->pins0.rx, out->pins1.tx, out->pins1.rx);
 }
 
 bool settings_save(const settings_t *s)
@@ -123,6 +196,11 @@ bool settings_save(const settings_t *s)
     nvs_set_u8(nvs, "p1mode", (uint8_t)s->port1.mode);
     nvs_set_u16(nvs, "p1pps", s->port1.pps);
 
+    nvs_set_i8(nvs, "p0tx", s->pins0.tx);
+    nvs_set_i8(nvs, "p0rx", s->pins0.rx);
+    nvs_set_i8(nvs, "p1tx", s->pins1.tx);
+    nvs_set_i8(nvs, "p1rx", s->pins1.rx);
+
     const esp_err_t err = nvs_commit(nvs);
     nvs_close(nvs);
 
@@ -144,7 +222,8 @@ bool settings_reset(void)
     // имён и к сетевым настройкам отношения не имеют.
     const char *keys[] = {"role", "ip", "mask", "gw", "peer",
                           "p0baud", "p0mode", "p0pps",
-                          "p1baud", "p1mode", "p1pps"};
+                          "p1baud", "p1mode", "p1pps",
+                          "p0tx", "p0rx", "p1tx", "p1rx"};
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         nvs_erase_key(nvs, keys[i]);
     }

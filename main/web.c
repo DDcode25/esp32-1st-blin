@@ -65,7 +65,7 @@ static const char INDEX_HTML[] =
 "Смена роли подставляет типовые адреса — их можно изменить вручную.</div>"
 "</div>"
 
-"<div class=card><h2>Порт 0 — UART1 (GPIO32/33), CRSF</h2>"
+"<div class=card><h2>Порт 0 — UART1, CRSF</h2>"
 "<div class=row>"
 "<div><label>Скорость, бод</label><input id=p0baud type=number></div>"
 "<div><label>Режим</label><select id=p0mode>"
@@ -73,9 +73,13 @@ static const char INDEX_HTML[] =
 "</select></div></div>"
 "<div id=p0ppsbox><label>Частота выдачи, Гц (25–250)</label>"
 "<input id=p0pps type=number min=25 max=250></div>"
+"<div class=row>"
+"<div><label>Пин TX</label><select id=p0tx onchange=pinInfo()></select></div>"
+"<div><label>Пин RX</label><select id=p0rx onchange=pinInfo()></select></div></div>"
+"<div id=p0pininfo style='font-size:12px;color:#a60;margin-top:6px'></div>"
 "<table id=p0stats></table></div>"
 
-"<div class=card><h2>Порт 1 — UART2 (GPIO14/15), MAVLink</h2>"
+"<div class=card><h2>Порт 1 — UART2, MAVLink</h2>"
 "<div class=row>"
 "<div><label>Скорость, бод</label><input id=p1baud type=number></div>"
 "<div><label>Режим</label><select id=p1mode>"
@@ -83,6 +87,14 @@ static const char INDEX_HTML[] =
 "</select></div></div>"
 "<div id=p1ppsbox><label>Частота выдачи, Гц (25–250)</label>"
 "<input id=p1pps type=number min=25 max=250></div>"
+"<div class=row>"
+"<div><label>Пин TX</label><select id=p1tx onchange=pinInfo()></select></div>"
+"<div><label>Пин RX</label><select id=p1rx onchange=pinInfo()></select></div></div>"
+"<div id=p1pininfo style='font-size:12px;color:#a60;margin-top:6px'></div>"
+"<div class=warn>Пины применяются после перезагрузки: переназначить UART "
+"на работающем порту нельзя. Звёздочка у номера — у пина есть особенность "
+"при загрузке или он нагружен; выбрать можно, но стоит понимать, чем "
+"чревато.</div>"
 "<table id=p1stats></table></div>"
 
 "<div class=card><h2>Терминал <button class=sec style='padding:4px 10px;"
@@ -142,6 +154,30 @@ static const char INDEX_HTML[] =
 // и в JavaScript попадает реальный разрыв строки — а он внутри
 // строкового литерала недопустим и роняет весь скрипт.
 "const NL=String.fromCharCode(10);"
+"const PINS=[[4,''],[32,''],[33,''],"
+"[14,'выдаёт PWM в момент загрузки'],"
+"[15,'при высоком уровне на старте выводится загрузочный лог'],"
+"[2,'мешает входу в режим прошивки при высоком уровне'],"
+"[5,'на линии светодиод — искажает фронты сигнала'],"
+"[17,'на линии светодиод — искажает фронты сигнала'],"
+"[12,'плата не загрузится, если при старте высокий уровень'],"
+"[35,'только вход, под TX не годится'],"
+"[36,'только вход, под TX не годится'],"
+"[39,'только вход, под TX не годится']];"
+"function fillPins(){for(const id of ['p0tx','p0rx','p1tx','p1rx']){"
+"const sel=g(id);sel.innerHTML='';"
+"for(const[n,warn]of PINS){"
+"if(id.endsWith('tx')&&n>=35)continue;"
+"const o=document.createElement('option');o.value=n;"
+"o.textContent='GPIO'+n+(warn?' *':'');sel.appendChild(o)}}}"
+"function pinInfo(){for(const p of ['p0','p1']){"
+"const notes=[];"
+"for(const s of ['tx','rx']){const v=+g(p+s).value;"
+"const f=PINS.find(x=>x[0]==v);"
+"if(f&&f[1])notes.push('GPIO'+v+': '+f[1])}"
+"const tx=+g(p+'tx').value,rx=+g(p+'rx').value;"
+"if(tx==rx)notes.push('TX и RX не могут быть на одном пине');"
+"g(p+'pininfo').innerHTML=notes.join('<br>')}}"
 "function g(i){return document.getElementById(i)}"
 "function roleChanged(){const a=g('role').value=='1';"
 "g('ip').value=a?'192.168.4.2':'192.168.4.1';"
@@ -173,18 +209,22 @@ static const char INDEX_HTML[] =
 "async function load(){const d=await(await fetch('/api/config')).json();"
 "g('role').value=d.role;g('ip').value=d.ip;g('mask').value=d.mask;"
 "g('gw').value=d.gw;g('peer').value=d.peer;"
+"fillPins();"
 "for(const p of ['p0','p1']){g(p+'baud').value=d[p].baud;"
 "g(p+'mode').value=d[p].mode;g(p+'pps').value=d[p].pps;"
-"g(p+'mode').onchange=()=>sync(p);sync(p)}}"
+"g(p+'tx').value=d[p].tx;g(p+'rx').value=d[p].rx;"
+"g(p+'mode').onchange=()=>sync(p);sync(p)}pinInfo()}"
 "async function save(){const b={role:+g('role').value,ip:g('ip').value,"
 "mask:g('mask').value,"
 "gw:g('gw').value,peer:g('peer').value,"
-"p0:{baud:+g('p0baud').value,mode:+g('p0mode').value,pps:+g('p0pps').value},"
-"p1:{baud:+g('p1baud').value,mode:+g('p1mode').value,pps:+g('p1pps').value}};"
+"p0:{baud:+g('p0baud').value,mode:+g('p0mode').value,"
+"pps:+g('p0pps').value,tx:+g('p0tx').value,rx:+g('p0rx').value},"
+"p1:{baud:+g('p1baud').value,mode:+g('p1mode').value,"
+"pps:+g('p1pps').value,tx:+g('p1tx').value,rx:+g('p1rx').value}};"
 "const r=await fetch('/api/config',{method:'POST',"
 "headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});"
-"alert(r.ok?'Сохранено. Настройки портов применены сразу, сетевые — после "
-"перезагрузки.':'Ошибка: проверь формат адресов')}"
+"alert(r.ok?'Сохранено. Скорость и режим применены сразу; пины и сетевые "
+"настройки — после перезагрузки.':'Ошибка: проверь формат адресов')}"
 "async function reboot(){if(!confirm('Перезагрузить модуль?'))return;"
 "await fetch('/api/reboot',{method:'POST'});"
 "alert('Перезагрузка. Обнови страницу через несколько секунд.')}"
@@ -376,14 +416,14 @@ static esp_err_t config_get_handler(httpd_req_t *req)
     const int n = snprintf(buf, sizeof(buf),
         "{\"role\":%d,\"ip\":\"%s\",\"mask\":\"%s\",\"gw\":\"%s\","
         "\"peer\":\"%s\","
-        "\"p0\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u},"
-        "\"p1\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u}}",
+        "\"p0\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u,\"tx\":%d,\"rx\":%d},"
+        "\"p1\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u,\"tx\":%d,\"rx\":%d}}",
         (int)s_settings->role, s_settings->local_ip, s_settings->netmask,
         s_settings->gateway, s_settings->peer_ip,
         (unsigned long)s_settings->port0.baud, (int)s_settings->port0.mode,
-        s_settings->port0.pps,
+        s_settings->port0.pps, s_settings->pins0.tx, s_settings->pins0.rx,
         (unsigned long)s_settings->port1.baud, (int)s_settings->port1.mode,
-        s_settings->port1.pps);
+        s_settings->port1.pps, s_settings->pins1.tx, s_settings->pins1.rx);
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, n);
@@ -438,6 +478,29 @@ static esp_err_t config_post_handler(httpd_req_t *req)
 
     apply_port_section(body, "p0", s_port0, &next.port0);
     apply_port_section(body, "p1", s_port1, &next.port1);
+
+    // Пины применяются только после перезагрузки: переназначить UART
+    // на работающем драйвере нельзя.
+    long v;
+    const char *why;
+    if (json_num(body, "p0", "tx", &v) && settings_pin_usable(v, true, &why)) {
+        next.pins0.tx = (int8_t)v;
+    }
+    if (json_num(body, "p0", "rx", &v) && settings_pin_usable(v, false, &why)) {
+        next.pins0.rx = (int8_t)v;
+    }
+    if (json_num(body, "p1", "tx", &v) && settings_pin_usable(v, true, &why)) {
+        next.pins1.tx = (int8_t)v;
+    }
+    if (json_num(body, "p1", "rx", &v) && settings_pin_usable(v, false, &why)) {
+        next.pins1.rx = (int8_t)v;
+    }
+
+    if (next.pins0.tx == next.pins0.rx || next.pins1.tx == next.pins1.rx) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+                            "TX и RX не могут быть на одном пине");
+        return ESP_FAIL;
+    }
 
     if (!settings_save(&next)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid settings");

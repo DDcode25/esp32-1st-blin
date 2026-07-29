@@ -122,12 +122,23 @@ void app_main(void)
     eth_bridge_start(s_settings.local_ip, s_settings.netmask,
                      s_settings.gateway, s_settings.peer_ip);
 
-    s_port0 = port_create(PORT0_UART_NUM, s_settings.pins0.tx,
-                          s_settings.pins0.rx, s_settings.udp0.local,
+    // Своп применяется здесь, а не внутри порта: порту незачем знать
+    // о том, что провода перепутаны — он получает уже верные пины.
+    const int p0_tx = s_settings.pins0.swap ? s_settings.pins0.rx
+                                            : s_settings.pins0.tx;
+    const int p0_rx = s_settings.pins0.swap ? s_settings.pins0.tx
+                                            : s_settings.pins0.rx;
+    const int p1_tx = s_settings.pins1.swap ? s_settings.pins1.rx
+                                            : s_settings.pins1.tx;
+    const int p1_rx = s_settings.pins1.swap ? s_settings.pins1.tx
+                                            : s_settings.pins1.rx;
+
+    s_port0 = port_create(PORT0_UART_NUM, p0_tx,
+                          p0_rx, s_settings.udp0.local,
                           s_settings.udp0.remote, s_settings.peer_ip,
                           "port0", &s_settings.port0);
-    s_port1 = port_create(PORT1_UART_NUM, s_settings.pins1.tx,
-                          s_settings.pins1.rx, s_settings.udp1.local,
+    s_port1 = port_create(PORT1_UART_NUM, p1_tx,
+                          p1_rx, s_settings.udp1.local,
                           s_settings.udp1.remote, s_settings.peer_ip,
                           "port1", &s_settings.port1);
 

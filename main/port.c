@@ -243,7 +243,8 @@ static void pace_task_fn(void *arg)
 
 // --- создание и настройка ----------------------------------------------------
 
-static bool setup_uart(port_t *p, uint32_t baud)
+static bool setup_uart(port_t *p, uint32_t baud, bool half_duplex,
+                       bool invert)
 {
     const uart_config_t cfg = {
         .baud_rate = (int)baud,
@@ -263,11 +264,38 @@ static bool setup_uart(port_t *p, uint32_t baud)
         ESP_LOGE(TAG, "[%s] неверные параметры UART", p->name);
         return false;
     }
-    if (uart_set_pin(p->uart_num, p->tx_gpio, p->rx_gpio, UART_PIN_NO_CHANGE,
+    // В half-duplex приём и передача идут по одному проводу: оба сигнала
+    // назначаются на один пин. Так подключается S_PORT пульта и
+    // однопроводный CRSF.
+    const int tx = p->tx_gpio;
+    const int rx = half_duplex ? p->tx_gpio : p->rx_gpio;
+
+    if (uart_set_pin(p->uart_num, tx, rx, UART_PIN_NO_CHANGE,
                      UART_PIN_NO_CHANGE) != ESP_OK) {
         ESP_LOGE(TAG, "[%s] не удалось назначить пины UART", p->name);
         return false;
     }
+
+    if (half_duplex) {
+        // Режим RS-485 заставляет драйвер глушить приём на время передачи.
+        // Без этого плата слышала бы собственную посылку и принимала её
+        // за данные от устройства.
+        if (uart_set_mode(p->uart_num, UART_MODE_RS485_HALF_DUPLEX) != ESP_OK) {
+            ESP_LOGE(TAG, "[%s] не удалось включить half-duplex", p->name);
+            return false;
+        }
+    }
+
+    if (invert) {
+        // S-Port от FrSky инвертирован; CRSF — нет. Без учёта этого линия
+        // выдаёт сплошной мусор.
+        const uint32_t mask = UART_SIGNAL_TXD_INV | UART_SIGNAL_RXD_INV;
+        if (uart_set_line_inverse(p->uart_num, mask) != ESP_OK) {
+            ESP_LOGE(TAG, "[%s] не удалось включить инверсию", p->name);
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -308,7 +336,7 @@ static bool setup_socket(port_t *p, const char *peer_ip)
 port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
                     uint16_t local_port, uint16_t remote_port,
                     const char *peer_ip, const char *name,
-                    const port_config_t *cfg)
+                    const port_config_t *cfg, bool half_duplex, bool invert)
 {
     port_t *p = calloc(1, sizeof(port_t));
     if (!p) {
@@ -343,7 +371,8 @@ port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
         return NULL;
     }
 
-    if (!setup_uart(p, cfg->baud) || !setup_socket(p, peer_ip)) {
+    if (!setup_uart(p, cfg->baud, half_duplex, invert) ||
+        !setup_socket(p, peer_ip)) {
         free(p);
         return NULL;
     }
@@ -370,10 +399,21 @@ port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
         esp_timer_start_periodic(p->pace_timer, 1000000UL / cfg->pps);
     }
 
-    ESP_LOGI(TAG, "[%s] %lu бод, %s, TX=GPIO%d RX=GPIO%d, UDP :%u -> %s:%u",
-             name, (unsigned long)cfg->baud,
-             cfg->mode == PORT_MODE_CRSF ? "CRSF" : "прозрачный",
-             tx_gpio, rx_gpio, local_port, peer_ip, remote_port);
+    if (half_duplex) {
+        ESP_LOGI(TAG,
+                 "[%s] %lu бод, %s, один провод GPIO%d%s, UDP :%u -> %s:%u",
+                 name, (unsigned long)cfg->baud,
+                 cfg->mode == PORT_MODE_CRSF ? "CRSF" : "прозрачный",
+                 tx_gpio, invert ? ", инверсия" : "",
+                 local_port, peer_ip, remote_port);
+    } else {
+        ESP_LOGI(TAG,
+                 "[%s] %lu бод, %s, TX=GPIO%d RX=GPIO%d%s, UDP :%u -> %s:%u",
+                 name, (unsigned long)cfg->baud,
+                 cfg->mode == PORT_MODE_CRSF ? "CRSF" : "прозрачный",
+                 tx_gpio, rx_gpio, invert ? ", инверсия" : "",
+                 local_port, peer_ip, remote_port);
+    }
 
     return p;
 }

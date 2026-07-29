@@ -56,10 +56,12 @@ typedef struct port_s port_t;
 #define PACER_QUEUE_DEPTH_PUBLIC 8
 
 // Создаёт и запускает порт. Вызывать после подъёма Ethernet.
+// half_duplex — приём и передача по одному проводу (пин берётся из tx_gpio).
+// invert — инверсия сигнала на линии, нужна для S-Port от FrSky.
 port_t *port_create(uart_port_t uart_num, int tx_gpio, int rx_gpio,
                     uint16_t local_port, uint16_t remote_port,
                     const char *peer_ip, const char *name,
-                    const port_config_t *cfg);
+                    const port_config_t *cfg, bool half_duplex, bool invert);
 
 // Меняет конфигурацию на лету, без перезапуска задач.
 void port_apply_config(port_t *port, const port_config_t *cfg);

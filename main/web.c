@@ -82,9 +82,17 @@ static const char INDEX_HTML[] =
 "<input id=p0ul type=number min=1 max=65535></div>"
 "<div><label>UDP-порт отправки</label>"
 "<input id=p0ur type=number min=1 max=65535></div></div>"
+"<label>Линия</label><select id=p0hd onchange=lineInfo()>"
+"<option value=0>два провода — TX и RX раздельно</option>"
+"<option value=1>один провод — приём и передача по очереди</option>"
+"</select>"
 "<label style='display:flex;align-items:center;gap:8px;margin-top:10px'>"
 "<input type=checkbox id=p0sw style='width:auto;margin:0'>"
 "поменять TX и RX местами</label>"
+"<label style='display:flex;align-items:center;gap:8px;margin-top:6px'>"
+"<input type=checkbox id=p0iv style='width:auto;margin:0'>"
+"инвертировать сигнал (S-Port от FrSky)</label>"
+"<div id=p0lineinfo style='font-size:12px;color:#a60;margin-top:6px'></div>"
 "<table id=p0stats></table></div>"
 
 "<div class=card><h2>Порт 1 — UART2, MAVLink</h2>"
@@ -104,9 +112,17 @@ static const char INDEX_HTML[] =
 "<input id=p1ul type=number min=1 max=65535></div>"
 "<div><label>UDP-порт отправки</label>"
 "<input id=p1ur type=number min=1 max=65535></div></div>"
+"<label>Линия</label><select id=p1hd onchange=lineInfo()>"
+"<option value=0>два провода — TX и RX раздельно</option>"
+"<option value=1>один провод — приём и передача по очереди</option>"
+"</select>"
 "<label style='display:flex;align-items:center;gap:8px;margin-top:10px'>"
 "<input type=checkbox id=p1sw style='width:auto;margin:0'>"
 "поменять TX и RX местами</label>"
+"<label style='display:flex;align-items:center;gap:8px;margin-top:6px'>"
+"<input type=checkbox id=p1iv style='width:auto;margin:0'>"
+"инвертировать сигнал (S-Port от FrSky)</label>"
+"<div id=p1lineinfo style='font-size:12px;color:#a60;margin-top:6px'></div>"
 "<div class=warn>Пины и UDP-порты применяются после перезагрузки: "
 "переназначить UART и пересоздать сокет на работающем порту нельзя. "
 "Звёздочка у номера пина — есть особенность при загрузке или он нагружен; "
@@ -115,7 +131,12 @@ static const char INDEX_HTML[] =
 "станция ждёт данные на своём порту — например, QGroundControl на "
 "14550.<br><br>"
 "Своп TX/RX выручает, когда провода подключены наоборот: вместо перепайки "
-"поставь галочку и перезагрузи.</div>"
+"поставь галочку и перезагрузи.<br><br>"
+"<b>Один провод</b> — для S_PORT пульта и однопроводного CRSF: устройства "
+"говорят по очереди по одной линии, приём глушится на время передачи. "
+"Используется пин TX, пин RX свободен.<br><br>"
+"<b>Инверсия</b> нужна для S-Port от FrSky; у CRSF сигнал не инвертирован. "
+"Если на линии сплошной мусор — попробуй переключить.</div>"
 "<table id=p1stats></table></div>"
 
 "<div class=card><h2>Терминал <button class=sec style='padding:4px 10px;"
@@ -191,6 +212,11 @@ static const char INDEX_HTML[] =
 "if(id.endsWith('tx')&&n>=35)continue;"
 "const o=document.createElement('option');o.value=n;"
 "o.textContent='GPIO'+n+(warn?' *':'');sel.appendChild(o)}}}"
+"function lineInfo(){for(const p of ['p0','p1']){"
+"const half=g(p+'hd').value=='1';"
+"g(p+'lineinfo').textContent=half?"
+"'Приём и передача по проводу на пине TX. Пин RX не используется.':'';"
+"g(p+'rx').disabled=half;g(p+'sw').disabled=half}}"
 "function pinInfo(){for(const p of ['p0','p1']){"
 "const notes=[];"
 "for(const s of ['tx','rx']){const v=+g(p+s).value;"
@@ -235,17 +261,20 @@ static const char INDEX_HTML[] =
 "g(p+'mode').value=d[p].mode;g(p+'pps').value=d[p].pps;"
 "g(p+'tx').value=d[p].tx;g(p+'rx').value=d[p].rx;"
 "g(p+'ul').value=d[p].ul;g(p+'ur').value=d[p].ur;"
-"g(p+'sw').checked=!!d[p].sw;"
-"g(p+'mode').onchange=()=>sync(p);sync(p)}pinInfo()}"
+"g(p+'sw').checked=!!d[p].sw;g(p+'hd').value=d[p].hd;"
+"g(p+'iv').checked=!!d[p].iv;"
+"g(p+'mode').onchange=()=>sync(p);sync(p)}pinInfo();lineInfo()}"
 "async function save(){const b={role:+g('role').value,ip:g('ip').value,"
 "mask:g('mask').value,"
 "gw:g('gw').value,peer:g('peer').value,"
 "p0:{baud:+g('p0baud').value,mode:+g('p0mode').value,"
 "pps:+g('p0pps').value,tx:+g('p0tx').value,rx:+g('p0rx').value,"
-"ul:+g('p0ul').value,ur:+g('p0ur').value,sw:g('p0sw').checked?1:0},"
+"ul:+g('p0ul').value,ur:+g('p0ur').value,sw:g('p0sw').checked?1:0,"
+"hd:+g('p0hd').value,iv:g('p0iv').checked?1:0},"
 "p1:{baud:+g('p1baud').value,mode:+g('p1mode').value,"
 "pps:+g('p1pps').value,tx:+g('p1tx').value,rx:+g('p1rx').value,"
-"ul:+g('p1ul').value,ur:+g('p1ur').value,sw:g('p1sw').checked?1:0}};"
+"ul:+g('p1ul').value,ur:+g('p1ur').value,sw:g('p1sw').checked?1:0,"
+"hd:+g('p1hd').value,iv:g('p1iv').checked?1:0}};"
 "const r=await fetch('/api/config',{method:'POST',"
 "headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});"
 "alert(r.ok?'Сохранено. Скорость и режим применены сразу; пины и сетевые "
@@ -442,19 +471,21 @@ static esp_err_t config_get_handler(httpd_req_t *req)
         "{\"role\":%d,\"ip\":\"%s\",\"mask\":\"%s\",\"gw\":\"%s\","
         "\"peer\":\"%s\","
         "\"p0\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u,\"tx\":%d,\"rx\":%d,"
-        "\"ul\":%u,\"ur\":%u,\"sw\":%d},"
+        "\"ul\":%u,\"ur\":%u,\"sw\":%d,\"hd\":%d,\"iv\":%d},"
         "\"p1\":{\"baud\":%lu,\"mode\":%d,\"pps\":%u,\"tx\":%d,\"rx\":%d,"
-        "\"ul\":%u,\"ur\":%u,\"sw\":%d}}",
+        "\"ul\":%u,\"ur\":%u,\"sw\":%d,\"hd\":%d,\"iv\":%d}}",
         (int)s_settings->role, s_settings->local_ip, s_settings->netmask,
         s_settings->gateway, s_settings->peer_ip,
         (unsigned long)s_settings->port0.baud, (int)s_settings->port0.mode,
         s_settings->port0.pps, s_settings->pins0.tx, s_settings->pins0.rx,
         s_settings->udp0.local, s_settings->udp0.remote,
-        s_settings->pins0.swap ? 1 : 0,
+        s_settings->pins0.swap ? 1 : 0, (int)s_settings->pins0.line,
+        s_settings->pins0.invert ? 1 : 0,
         (unsigned long)s_settings->port1.baud, (int)s_settings->port1.mode,
         s_settings->port1.pps, s_settings->pins1.tx, s_settings->pins1.rx,
         s_settings->udp1.local, s_settings->udp1.remote,
-        s_settings->pins1.swap ? 1 : 0);
+        s_settings->pins1.swap ? 1 : 0, (int)s_settings->pins1.line,
+        s_settings->pins1.invert ? 1 : 0);
 
     httpd_resp_set_type(req, "application/json");
     return httpd_resp_send(req, buf, n);
@@ -548,6 +579,19 @@ static esp_err_t config_post_handler(httpd_req_t *req)
     }
     if (json_num(body, "p1", "sw", &v)) {
         next.pins1.swap = (v != 0);
+    }
+
+    if (json_num(body, "p0", "hd", &v)) {
+        next.pins0.line = (v == 1) ? LINE_HALF_DUPLEX : LINE_FULL_DUPLEX;
+    }
+    if (json_num(body, "p1", "hd", &v)) {
+        next.pins1.line = (v == 1) ? LINE_HALF_DUPLEX : LINE_FULL_DUPLEX;
+    }
+    if (json_num(body, "p0", "iv", &v)) {
+        next.pins0.invert = (v != 0);
+    }
+    if (json_num(body, "p1", "iv", &v)) {
+        next.pins1.invert = (v != 0);
     }
 
     // Два порта не могут слушать на одном номере: второй bind() не пройдёт,

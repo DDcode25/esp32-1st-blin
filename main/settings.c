@@ -125,6 +125,10 @@ void settings_load(settings_t *out)
     out->pins1.rx = PORT1_RX_GPIO;
     out->pins0.swap = false;
     out->pins1.swap = false;
+    out->pins0.line = LINE_FULL_DUPLEX;
+    out->pins1.line = LINE_FULL_DUPLEX;
+    out->pins0.invert = false;
+    out->pins1.invert = false;
 
     out->udp0.local = PORT0_UDP_PORT;
     out->udp0.remote = PORT0_UDP_PORT;
@@ -174,15 +178,24 @@ void settings_load(settings_t *out)
     if (nvs_get_u8(nvs, "p0sw", &u8) == ESP_OK) out->pins0.swap = u8 != 0;
     if (nvs_get_u8(nvs, "p1sw", &u8) == ESP_OK) out->pins1.swap = u8 != 0;
 
+    if (nvs_get_u8(nvs, "p0hd", &u8) == ESP_OK) out->pins0.line = u8;
+    if (nvs_get_u8(nvs, "p1hd", &u8) == ESP_OK) out->pins1.line = u8;
+    if (nvs_get_u8(nvs, "p0iv", &u8) == ESP_OK) out->pins0.invert = u8 != 0;
+    if (nvs_get_u8(nvs, "p1iv", &u8) == ESP_OK) out->pins1.invert = u8 != 0;
+
     nvs_close(nvs);
 
     ESP_LOGI(TAG, "роль %s, %s -> %s", settings_role_name(out->role),
              out->local_ip, out->peer_ip);
-    ESP_LOGI(TAG, "порт 0: TX=GPIO%d RX=GPIO%d%s, UDP %u->%u",
-             out->pins0.tx, out->pins0.rx, out->pins0.swap ? " (своп)" : "",
+    ESP_LOGI(TAG, "порт 0: TX=GPIO%d RX=GPIO%d%s%s%s, UDP %u->%u",
+             out->pins0.tx, out->pins0.rx, out->pins0.swap ? " своп" : "",
+             out->pins0.line == LINE_HALF_DUPLEX ? " half-duplex" : "",
+             out->pins0.invert ? " инверсия" : "",
              out->udp0.local, out->udp0.remote);
-    ESP_LOGI(TAG, "порт 1: TX=GPIO%d RX=GPIO%d%s, UDP %u->%u",
-             out->pins1.tx, out->pins1.rx, out->pins1.swap ? " (своп)" : "",
+    ESP_LOGI(TAG, "порт 1: TX=GPIO%d RX=GPIO%d%s%s%s, UDP %u->%u",
+             out->pins1.tx, out->pins1.rx, out->pins1.swap ? " своп" : "",
+             out->pins1.line == LINE_HALF_DUPLEX ? " half-duplex" : "",
+             out->pins1.invert ? " инверсия" : "",
              out->udp1.local, out->udp1.remote);
 }
 
@@ -228,6 +241,11 @@ bool settings_save(const settings_t *s)
     nvs_set_u8(nvs, "p0sw", s->pins0.swap ? 1 : 0);
     nvs_set_u8(nvs, "p1sw", s->pins1.swap ? 1 : 0);
 
+    nvs_set_u8(nvs, "p0hd", (uint8_t)s->pins0.line);
+    nvs_set_u8(nvs, "p1hd", (uint8_t)s->pins1.line);
+    nvs_set_u8(nvs, "p0iv", s->pins0.invert ? 1 : 0);
+    nvs_set_u8(nvs, "p1iv", s->pins1.invert ? 1 : 0);
+
     const esp_err_t err = nvs_commit(nvs);
     nvs_close(nvs);
 
@@ -252,7 +270,7 @@ bool settings_reset(void)
                           "p1baud", "p1mode", "p1pps",
                           "p0tx", "p0rx", "p1tx", "p1rx",
                           "p0ul", "p0ur", "p1ul", "p1ur",
-                          "p0sw", "p1sw"};
+                          "p0sw", "p1sw", "p0hd", "p1hd", "p0iv", "p1iv"};
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         nvs_erase_key(nvs, keys[i]);
     }

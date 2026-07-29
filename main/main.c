@@ -136,11 +136,15 @@ void app_main(void)
     s_port0 = port_create(PORT0_UART_NUM, p0_tx,
                           p0_rx, s_settings.udp0.local,
                           s_settings.udp0.remote, s_settings.peer_ip,
-                          "port0", &s_settings.port0);
+                          "port0", &s_settings.port0,
+                          s_settings.pins0.line == LINE_HALF_DUPLEX,
+                          s_settings.pins0.invert);
     s_port1 = port_create(PORT1_UART_NUM, p1_tx,
                           p1_rx, s_settings.udp1.local,
                           s_settings.udp1.remote, s_settings.peer_ip,
-                          "port1", &s_settings.port1);
+                          "port1", &s_settings.port1,
+                          s_settings.pins1.line == LINE_HALF_DUPLEX,
+                          s_settings.pins1.invert);
 
     if (!s_port0 || !s_port1) {
         ESP_LOGE(TAG, "не удалось создать порты, мост не работает");
